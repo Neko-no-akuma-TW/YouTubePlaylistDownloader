@@ -4,6 +4,32 @@ import os
 import re
 import subprocess
 import json
+import shutil
+import sys
+import subprocess
+import yt_dlp
+
+
+def update_yt_dlp():
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"])
+        print("yt-dlp 已成功更新到最新版本。")
+    except subprocess.CalledProcessError as e:
+        print(f"更新 yt-dlp 時發生錯誤: {e}")
+
+
+def download_with_error_handling(video_url, ydl_opts):
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            ydl.download([video_url])
+        except yt_dlp.utils.DownloadError as e:
+            if "signature" in str(e).lower() or "nsig" in str(e).lower():
+                print(f"下載時遇到簽名相關錯誤: {e}")
+                print("嘗試更新 yt-dlp...")
+                update_yt_dlp()
+                print("請重新運行程序以使用更新後的 yt-dlp。")
+            else:
+                print(f"下載時發生錯誤: {e}")
 
 
 def sanitize_filename(filename):
@@ -12,27 +38,46 @@ def sanitize_filename(filename):
 
 def set_thumbnail(video_path, thumbnail_path):
     temp_file = f'{video_path}.temp.mp4'
+    jpg_thumbnail = f'{thumbnail_path}.jpg'
     try:
-        # Convert webp to jpg
-        jpg_thumbnail = f'{thumbnail_path}.jpg'
+        # 轉換 webp 到 jpg
         subprocess.run(['ffmpeg', '-i', thumbnail_path, jpg_thumbnail], check=True, stderr=subprocess.DEVNULL)
 
-        # Embed jpg thumbnail
+        # 嵌入 jpg 縮圖
         subprocess.run(['ffmpeg', '-i', video_path, '-i', jpg_thumbnail,
                         '-map', '0', '-map', '1', '-c', 'copy',
-                        '-disposition:v:1', 'attached_pic', temp_file],
+                        '-disposition:v:1', 'attached_pic', '-metadata:s:v:1', 'title="Thumbnail"',
+                        temp_file],
                        check=True, stderr=subprocess.DEVNULL)
 
-        os.replace(temp_file, video_path)
-        print(f"成功設置縮圖: {video_path}")
+        # 驗證縮圖是否成功嵌入
+        result = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:1',
+                                 '-count_packets', '-show_entries', 'stream=nb_read_packets',
+                                 '-of', 'csv=p=0', temp_file],
+                                capture_output=True, text=True)
 
-        # Clean up
-        os.remove(jpg_thumbnail)
+        if int(result.stdout.strip()) > 0:
+            shutil.move(temp_file, video_path)
+            print(f"成功設置縮圖: {video_path}")
+        else:
+            print(f"縮圖嵌入失敗: {video_path}")
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+
     except subprocess.CalledProcessError as e:
         print(f"設置縮圖失敗: {video_path}. 錯誤: {str(e)}")
     finally:
+        # 清理臨時文件
         if os.path.exists(temp_file):
             os.remove(temp_file)
+        if os.path.exists(jpg_thumbnail):
+            os.remove(jpg_thumbnail)
+        if os.path.exists(thumbnail_path):
+            try:
+                os.remove(thumbnail_path)
+                print(f"成功刪除原始縮圖文件: {thumbnail_path}")
+            except Exception as e:
+                print(f"刪除原始縮圖文件失敗 {thumbnail_path}: {str(e)}")
 
 
 def embed_chapters(video_path, chapters):
@@ -79,6 +124,10 @@ def download_video(video_url, output_path, video_number):
         'writethumbnail': True,
         'skip_download': False,
         'merge_output_format': 'mp4',
+        'postprocessors': [{
+            'key': 'FFmpegMetadata',
+            'add_metadata': True,
+        }],
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -110,7 +159,7 @@ def download_video(video_url, output_path, video_number):
             thumbnail_path = os.path.join(output_path, f"{base_filename}.webp")
             if os.path.exists(thumbnail_path):
                 set_thumbnail(video_path, thumbnail_path)
-                os.remove(thumbnail_path)  # 刪除原始縮圖文件
+                # 刪除原始縮圖文件的操作已經移到 set_thumbnail 函數中
 
             # 嵌入章節
             if 'chapters' in info:
@@ -121,6 +170,7 @@ def download_video(video_url, output_path, video_number):
             print(f"成功下載: {base_filename}")
         except Exception as e:
             print(f"下載失敗 {video_url}: {str(e)}")
+            download_with_error_handling(video_url, ydl_opts)
 
 
 def download_playlist(playlist_url, output_path, max_workers=5):
@@ -142,7 +192,7 @@ def download_playlist(playlist_url, output_path, max_workers=5):
 
 def cleanup_temp_files(output_path):
     for filename in os.listdir(output_path):
-        if filename.endswith('.temp.mp4'):
+        if filename.endswith('.temp.mp4') or filename.endswith('.webp') or filename.endswith('.jpg'):
             file_path = os.path.join(output_path, filename)
             try:
                 os.remove(file_path)
