@@ -201,11 +201,31 @@ def cleanup_temp_files(output_path):
                 print(f"刪除臨時文件失敗 {filename}: {str(e)}")
 
 
-if __name__ == "__main__":
-    playlist_url = input("請輸入YouTube播放清單URL: ")
-    output_path = input("請輸入保存路徑: ")
-    max_workers = int(input("請輸入同時下載的最大線程數 (建議 5): "))
+def download_single_video(video_url, output_path):
+    video_number = 1  # 單個視頻編號設為1
+    download_video(video_url, output_path, video_number)
 
-    download_playlist(playlist_url, output_path, max_workers)
+def main():
+    print("YouTube 下載器")
+    print("1. 下載單個影片")
+    print("2. 下載播放清單")
+    choice = input("請選擇下載模式 (1 或 2): ")
+
+    output_path = input("請輸入保存路徑: ")
+
+    if choice == '1':
+        video_url = input("請輸入YouTube影片URL: ")
+        download_single_video(video_url, output_path)
+    elif choice == '2':
+        playlist_url = input("請輸入YouTube播放清單URL: ")
+        max_workers = int(input("請輸入同時下載的最大線程數 (建議 5): "))
+        download_playlist(playlist_url, output_path, max_workers)
+    else:
+        print("無效的選擇，請輸入 1 或 2")
+        return
+
     cleanup_temp_files(output_path)
     print("下載完成！")
+
+if __name__ == "__main__":
+    main()
