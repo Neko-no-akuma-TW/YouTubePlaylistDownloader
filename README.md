@@ -29,6 +29,14 @@ python main.py
 
 ---
 
+## 感謝以下的協作者們
+因為有你們，所以這個專案才會變得更好。<br/>
+<a href="https://github.com/Neko-no-akuma-TW/YouTubePlaylistDownloader/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Neko-no-akuma-TW/YouTubePlaylistDownloader" />
+</a>
+
+---
+
 # 版權聲明
 此專案僅在此網站(Github)發布並開源，若於其他網站下載，造成使用者財產損失，開發者將不負相關責任。
 
