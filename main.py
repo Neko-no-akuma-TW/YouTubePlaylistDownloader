@@ -35,7 +35,7 @@ class App(ctk.CTk):
             download_single_video(url, path)
         elif mode == "Playlist":
             download_playlist(url, path, 5)
-        cleanup_temp_files()
+        cleanup_temp_files(path)
 
 if __name__ == "__main__":
     app = App()
