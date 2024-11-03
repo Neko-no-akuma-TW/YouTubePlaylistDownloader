@@ -113,20 +113,37 @@ def embed_chapters(video_path, chapters):
 
 
 def download_video(video_url, output_path, video_number):
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': os.path.join(output_path, f'{video_number:03d}-%(title)s.%(ext)s'),
-        'writesubtitles': True,
-        'subtitleslangs': ['zh.TW', 'zh.CN', 'en', 'ja'],
-        'subtitlesformat': 'vtt,srt',
-        'writethumbnail': True,
-        'skip_download': False,
-        'merge_output_format': 'mp4',
-        'postprocessors': [{
-            'key': 'FFmpegMetadata',
-            'add_metadata': True,
-        }],
-    }
+    if not os.path.exists("./cookies.txt"):
+        ydl_opts = {
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'outtmpl': os.path.join(output_path, f'{video_number:03d}-%(title)s.%(ext)s'),
+            'writesubtitles': True,
+            'subtitleslangs': ['zh.TW', 'zh.CN', 'en', 'ja'],
+            'subtitlesformat': 'vtt,srt',
+            'writethumbnail': True,
+            'skip_download': False,
+            'merge_output_format': 'mp4',
+            'postprocessors': [{
+                'key': 'FFmpegMetadata',
+                'add_metadata': True,
+            }],
+        }
+    else:
+        ydl_opts = {
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'outtmpl': os.path.join(output_path, f'{video_number:03d}-%(title)s.%(ext)s'),
+            'writesubtitles': True,
+            'subtitleslangs': ['zh.TW', 'zh.CN', 'en', 'ja'],
+            'subtitlesformat': 'vtt,srt',
+            'writethumbnail': True,
+            'skip_download': False,
+            'merge_output_format': 'mp4',
+            'postprocessors': [{
+                'key': 'FFmpegMetadata',
+                'add_metadata': True,
+            }],
+            'cookiefile': 'cookies.txt',
+        }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:

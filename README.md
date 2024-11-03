@@ -25,6 +25,21 @@ python main.py
 
 ---
 
+## 提示
+本程式支持透過Google帳號登入下載被授權可瀏覽的私人影片與播放清單，以下是使用教學(如不需下載私人影片可以不用進行下方操作)
+1. 在瀏覽器安裝[此套件](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
+2. 登入Google帳號
+3. 前往YouTube並登入
+4. 點擊套件圖示，並且點擊`Export All Cookies`，將cookies.txt下載下來
+5. 將cookies.txt放入程式資料夾
+6. 執行程式
+
+# ⚠️cookies.txt必須在使用此程式前更新，否則可能會無法下載私人影片
+# ⚠️cookies.txt內有您的登入以及其他隱私資訊，請勿分享給他人
+
+
+---
+
 ## 歡迎各位創建PR(Pull Request)讓這個專案變得更好
 
 ---
