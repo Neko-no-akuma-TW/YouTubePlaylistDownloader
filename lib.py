@@ -6,28 +6,35 @@ import sys
 import subprocess
 import yt_dlp
 import concurrent
+import glob
 
 
 def update_yt_dlp():
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"], stderr=subprocess.DEVNULL)
         print("yt-dlp 已成功更新到最新版本。")
     except subprocess.CalledProcessError as e:
         print(f"更新 yt-dlp 時發生錯誤: {e}")
+        print("請檢查您的網路連線或權限設定，然後重新執行程式。")
 
 
-def download_with_error_handling(video_url, ydl_opts):
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            ydl.download([video_url])
-        except yt_dlp.utils.DownloadError as e:
-            if "signature" in str(e).lower() or "nsig" in str(e).lower():
-                print(f"下載時遇到簽名相關錯誤: {e}")
-                print("嘗試更新 yt-dlp...")
-                update_yt_dlp()
-                print("請重新運行程序以使用更新後的 yt-dlp。")
-            else:
-                print(f"下載時發生錯誤: {e}")
+def download_with_error_handling(video_url, ydl_opts, retry_count=3):
+    for i in range(retry_count):
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                ydl.download([video_url])
+                return  # 下載成功，跳出迴圈
+            except yt_dlp.utils.DownloadError as e:
+                if "signature" in str(e).lower() or "nsig" in str(e).lower():
+                    print(f"下載時遇到簽名相關錯誤: {e}")
+                    print(f"嘗試更新 yt-dlp... (嘗試次數: {i+1}/{retry_count})")
+                    update_yt_dlp()
+                else:
+                    print(f"下載時發生錯誤: {e}")
+        if i < retry_count - 1:
+            print("等待 5 秒後重新嘗試下載...")
+            time.sleep(5)
+    print(f"下載 {video_url} 失敗，已達到最大重試次數。")
 
 
 def sanitize_filename(filename):
@@ -37,9 +44,13 @@ def sanitize_filename(filename):
 def set_thumbnail(video_path, thumbnail_path):
     temp_file = f'{video_path}.temp.mp4'
     jpg_thumbnail = f'{thumbnail_path}.jpg'
+
     try:
-        # 轉換 webp 到 jpg
-        subprocess.run(['ffmpeg', '-i', thumbnail_path, jpg_thumbnail], check=True, stderr=subprocess.DEVNULL)
+        if not thumbnail_path.lower().endswith(".jpg"):
+            # 轉換 webp 到 jpg
+            subprocess.run(['ffmpeg', '-i', thumbnail_path, jpg_thumbnail], check=True, stderr=subprocess.DEVNULL)
+        else:
+            jpg_thumbnail = thumbnail_path  # 如果縮圖已經是 JPG，則直接使用
 
         # 嵌入 jpg 縮圖
         subprocess.run(['ffmpeg', '-i', video_path, '-i', jpg_thumbnail,
@@ -52,7 +63,7 @@ def set_thumbnail(video_path, thumbnail_path):
         result = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:1',
                                  '-count_packets', '-show_entries', 'stream=nb_read_packets',
                                  '-of', 'csv=p=0', temp_file],
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, stderr=subprocess.DEVNULL)
 
         if int(result.stdout.strip()) > 0:
             shutil.move(temp_file, video_path)
@@ -68,14 +79,9 @@ def set_thumbnail(video_path, thumbnail_path):
         # 清理臨時文件
         if os.path.exists(temp_file):
             os.remove(temp_file)
-        if os.path.exists(jpg_thumbnail):
+        if os.path.exists(jpg_thumbnail) and jpg_thumbnail != thumbnail_path:
             os.remove(jpg_thumbnail)
-        if os.path.exists(thumbnail_path):
-            try:
-                os.remove(thumbnail_path)
-                print(f"成功刪除原始縮圖文件: {thumbnail_path}")
-            except Exception as e:
-                print(f"刪除原始縮圖文件失敗 {thumbnail_path}: {str(e)}")
+
 
 
 def embed_chapters(video_path, chapters):
@@ -112,41 +118,27 @@ def embed_chapters(video_path, chapters):
             os.remove(metadata_file)
 
 
-def download_video(video_url, output_path, video_number):
-    if not os.path.exists("./cookies.txt"):
-        ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': os.path.join(output_path, f'{video_number:03d}-%(title)s.%(ext)s'),
-            'writesubtitles': True,
-            'subtitleslangs': ['zh.TW', 'zh.CN', 'en', 'ja'],
-            'subtitlesformat': 'vtt,srt',
-            'writethumbnail': True,
-            'skip_download': False,
-            'merge_output_format': 'mp4',
-            'postprocessors': [{
-                'key': 'FFmpegMetadata',
-                'add_metadata': True,
-            }],
-        }
-    else:
-        ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': os.path.join(output_path, f'{video_number:03d}-%(title)s.%(ext)s'),
-            'writesubtitles': True,
-            'subtitleslangs': ['zh.TW', 'zh.CN', 'en', 'ja'],
-            'subtitlesformat': 'vtt,srt',
-            'writethumbnail': True,
-            'skip_download': False,
-            'merge_output_format': 'mp4',
-            'postprocessors': [{
-                'key': 'FFmpegMetadata',
-                'add_metadata': True,
-            }],
-            'cookiefile': 'cookies.txt',
-        }
+def download_video(video_url, output_path, video_number, use_cookies=False):
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': os.path.join(output_path, f'{video_number:03d}-%(title)s.%(ext)s'),
+        'writesubtitles': True,
+        'subtitleslangs': ['zh.TW', 'zh.CN', 'en', 'ja'],
+        'subtitlesformat': 'vtt,srt',
+        'writethumbnail': True,
+        'skip_download': False,
+        'merge_output_format': 'mp4',
+        'postprocessors': [{
+            'key': 'FFmpegMetadata',
+            'add_metadata': True,
+        }],
+    }
+    if use_cookies:
+        ydl_opts['cookiefile'] = 'cookies.txt'
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
             video_title = sanitize_filename(info['title'])
             base_filename = f"{video_number:03d}-{video_title}"
@@ -155,26 +147,23 @@ def download_video(video_url, output_path, video_number):
             # 處理字幕文件
             for lang in ['zh.TW', 'zh.CN', 'en', 'ja']:
                 vtt_subtitle = os.path.join(output_path, f"{base_filename}.{lang}.vtt")
+                srt_subtitle = os.path.join(output_path, f"{base_filename}.{lang}.srt")
                 if os.path.exists(vtt_subtitle):
                     print(f"已下載 VTT 字幕: {vtt_subtitle}")
+                    if os.path.exists(srt_subtitle):
+                        print(f"發現 SRT 字幕: {srt_subtitle}，將保留 VTT 字幕並刪除 SRT 字幕。")
+                        os.remove(srt_subtitle) # 預設刪除 SRT
                 else:
                     print(f"未找到 {lang} 的 VTT 字幕")
-
-            for lang in ['zh.TW', 'zh.CN', 'en', 'ja']:
-                srt_subtitle = os.path.join(output_path, f"{base_filename}.{lang}.srt")
-                if os.path.exists(srt_subtitle):
-                    print(f"已下載 SRT 字幕: {srt_subtitle}")
-                    vtt_subtitle = os.path.join(output_path, f"{base_filename}.{lang}.vtt")
-                    if os.path.exists(vtt_subtitle):
-                        os.remove(srt_subtitle)  # 刪除 SRT 字幕文件
-                else:
-                    print(f"未找到 {lang} 的 SRT 字幕")
+                    if os.path.exists(srt_subtitle):
+                        print(f"已下載 SRT 字幕: {srt_subtitle}")
+                    else:
+                        print(f"未找到 {lang} 的 SRT 字幕")
 
             # 設置縮圖
             thumbnail_path = os.path.join(output_path, f"{base_filename}.webp")
             if os.path.exists(thumbnail_path):
                 set_thumbnail(video_path, thumbnail_path)
-                # 刪除原始縮圖文件的操作已經移到 set_thumbnail 函數中
 
             # 嵌入章節
             if 'chapters' in info:
@@ -183,12 +172,12 @@ def download_video(video_url, output_path, video_number):
                 print(f"視頻沒有章節信息: {base_filename}")
 
             print(f"成功下載: {base_filename}")
-        except Exception as e:
-            print(f"下載失敗 {video_url}: {str(e)}")
-            download_with_error_handling(video_url, ydl_opts)
+    except Exception as e:
+        print(f"下載失敗 {video_url}: {str(e)}")
+        download_with_error_handling(video_url, ydl_opts)
 
 
-def download_playlist(playlist_url, output_path, max_workers=5):
+def download_playlist(playlist_url, output_path, use_cookies=False, max_workers=5):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
@@ -201,22 +190,19 @@ def download_playlist(playlist_url, output_path, max_workers=5):
         video_urls = [(i + 1, entry['url']) for i, entry in enumerate(playlist_dict['entries'])]
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(download_video, url, output_path, num) for num, url in video_urls]
+        futures = [executor.submit(download_video, url, output_path, num, use_cookies) for num, url in video_urls]
         concurrent.futures.wait(futures)
 
 
 def cleanup_temp_files(output_path):
-    for filename in os.listdir(output_path):
-        if filename.endswith('.temp.mp4') or filename.endswith('.webp') or filename.endswith('.jpg'):
-            file_path = os.path.join(output_path, filename)
-            try:
-                os.remove(file_path)
-                print(f"已刪除臨時文件: {filename}")
-            except Exception as e:
-                print(f"刪除臨時文件失敗 {filename}: {str(e)}")
+    for file_path in glob.glob(os.path.join(output_path, "*.temp.mp4")) + glob.glob(os.path.join(output_path, "*.webp")) + glob.glob(os.path.join(output_path, "*.jpg")):
+        try:
+            os.remove(file_path)
+            print(f"已刪除臨時文件: {os.path.basename(file_path)}")
+        except Exception as e:
+            print(f"刪除臨時文件失敗 {os.path.basename(file_path)}: {str(e)}")
 
 
-def download_single_video(video_url, output_path):
+def download_single_video(video_url, output_path, use_cookies=False):
     video_number = 1  # 單個視頻編號設為1
-    download_video(video_url, output_path, video_number)
-
+    download_video(video_url, output_path, video_number, use_cookies)
