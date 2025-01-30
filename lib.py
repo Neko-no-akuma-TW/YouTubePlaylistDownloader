@@ -7,6 +7,7 @@ import subprocess
 import yt_dlp
 import concurrent
 import glob
+import time
 
 
 def update_yt_dlp():
