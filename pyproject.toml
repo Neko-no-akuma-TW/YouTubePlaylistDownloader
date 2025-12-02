@@ -1,0 +1,10 @@
+[project]
+name = "youtubeplaylistdownloader"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "customtkinter>=5.2.2",
+    "yt-dlp[curl-cffi]>=2025.11.12",
+]
