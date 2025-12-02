@@ -160,4 +160,24 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
+
+# Project-specific ignores
+# 忽略根目錄下的執行檔
+*.exe
+
+# 忽略外部工具程式
+ffmpeg.exe
+ffplay.exe
+ffprobe.exe
+signtool.exe
+
+# 忽略憑證檔案
+*.pfx
+
+# 忽略 cookies.txt (包含敏感資訊)
 cookies.txt
+
+# 忽略編譯輸出目錄
+output/
+main.onefile-build/
+main.build/

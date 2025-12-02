@@ -1,2 +1,3 @@
 yt-dlp
 customtkinter
+yt-dlp[curl-cffi]

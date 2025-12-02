@@ -13,7 +13,7 @@
 
 ## 使用方法
 1. 安裝Python
-2. 安裝ffmepg 把exe 放入 Python的 Scripts 文件夾
+2. 安裝 [FFmpeg](https://ffmpeg.org/download.html)，並將其執行檔路徑加入到系統的 `PATH` 環境變數中。程式在執行時會需要它。
 3. 安裝所需套件
 ```
 pip install -r requirements.txt
