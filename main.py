@@ -319,8 +319,8 @@ class App(ctk.CTk):
         self.download_button.configure(state=tk.NORMAL)
         self.log(f"[CRITICAL ERROR] {error}")
         messagebox.showerror("錯誤", f"下載時發生嚴重錯誤：\n{error}")
-
-if __name__ == "__main__":
+        
+def main():
     if not check_ffmpeg():
         handle_ffmpeg_not_found()
 
@@ -334,3 +334,6 @@ if __name__ == "__main__":
         ctk.set_default_color_theme("blue")
         app = App()
         app.mainloop()
+
+if __name__ == "__main__":
+    main()

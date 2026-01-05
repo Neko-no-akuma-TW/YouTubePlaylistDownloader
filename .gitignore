@@ -175,9 +175,18 @@ signtool.exe
 *.pfx
 
 # 忽略 cookies.txt (包含敏感資訊)
-cookies.txt
+cookies*.txt
 
 # 忽略編譯輸出目錄
 output/
 main.onefile-build/
 main.build/
+
+# 忽略編譯腳本
+build.bat
+
+# YTDLP POT 專案目錄
+bgutil-ytdlp-pot-provider/
+
+# 忽略數位簽章步驟資訊
+exe數位簽證步驟.txt
