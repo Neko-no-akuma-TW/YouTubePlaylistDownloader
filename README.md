@@ -35,7 +35,6 @@ python main.py
 PS: 如果你在使用Cookie後有出現警告，可以使用這個[專案](https://github.com/Brainicism/bgutil-ytdlp-pot-provider)，具體操作步驟請自行參考該專案的README文件。完成伺服器的啟動後，重啟本應用即可。
 
 
-# ⚠️cookies.txt必須在使用此程式前更新，否則可能會無法下載私人影片
 # ⚠️cookies.txt內有您的登入以及其他隱私資訊，請勿分享給他人
 # ⚠️如果因為使用cookie進行下載而造成帳號被封鎖、停權等，開發者不負相關責任
 
