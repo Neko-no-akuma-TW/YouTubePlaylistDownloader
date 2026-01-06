@@ -74,6 +74,9 @@ def download_video(video_url: str, output_path: str, video_number: int, use_cook
         'postprocessors': format_opts.get('postprocessors', []) + ([{'key': 'FFmpegMetadata','add_metadata': True}] if "Audio" not in download_format else []),
         'progress_hooks': [hook],
         'logger': ProgressLogger(progress_hook),
+        'external_downloader': 'ffmpeg',
+        'hls_use_mpegts': True,
+        'download_archive': os.path.join(output_path, 'downloaded.txt'),
     }
     ydl_opts.update(format_opts)
 

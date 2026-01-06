@@ -190,3 +190,6 @@ bgutil-ytdlp-pot-provider/
 
 # 忽略數位簽章步驟資訊
 exe數位簽證步驟.txt
+
+# 忽略程式個人設定檔
+config.json
