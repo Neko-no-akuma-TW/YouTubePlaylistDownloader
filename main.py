@@ -9,10 +9,9 @@ import json
 from typing import Dict, Any, List, Callable
 from queue import Queue
 
-if len(sys.argv) == 1:
-    import tkinter as tk
-    import customtkinter as ctk
-    from tkinter import filedialog, messagebox
+import tkinter as tk
+import customtkinter as ctk
+from tkinter import filedialog, messagebox
 
 # --- Config Functions ---
 CONFIG_FILE = "config.json"
@@ -20,7 +19,7 @@ CONFIG_FILE = "config.json"
 def load_config() -> Dict[str, Any]:
     defaults = {
         "path": "", "use_cookies": False, "multithread": False, 
-        "threads": 5, "zip_files": True, "format": "Best Video"
+        "threads": 5, "zip_files": True, "format": "Best Video", "use_pot": False
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -104,7 +103,10 @@ class App(ctk.CTk):
         self.zip_files_checkbox.pack(side="left", padx=(0, 20))
         self.multithread_var = tk.BooleanVar()
         self.multithread_checkbox = ctk.CTkCheckBox(self.checkbox_frame, text="多線程下載", variable=self.multithread_var, command=self.toggle_multithread_options)
-        self.multithread_checkbox.pack(side="left")
+        self.multithread_checkbox.pack(side="left", padx=(0, 20))
+        self.use_pot_var = tk.BooleanVar()
+        self.use_pot_checkbox = ctk.CTkCheckBox(self.checkbox_frame, text="使用 PotProvider", variable=self.use_pot_var)
+        self.use_pot_checkbox.pack(side="left")
 
         # Playlist Frame
         self.playlist_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -166,7 +168,7 @@ class App(ctk.CTk):
         analysis_thread.start()
 
     def run_analysis(self, url: str):
-        playlist_info = get_playlist_info(url, self.use_cookies_var.get())
+        playlist_info = get_playlist_info(url, self.use_cookies_var.get(), self.use_pot_var.get())
         self.after(0, self.populate_playlist_frame, playlist_info)
 
     def populate_playlist_frame(self, playlist_info: Optional[Dict[str, Any]]):
@@ -216,6 +218,7 @@ class App(ctk.CTk):
             "use_cookies": self.use_cookies_var.get(),
             "zip_files": self.zip_files_var.get(),
             "download_format": self.format_var.get(),
+            "use_pot": self.use_pot_var.get(),
             "progress_hook": self.progress_queue.put
         }
 
@@ -249,6 +252,7 @@ class App(ctk.CTk):
         self.thread_slider.set(thread_count)
         self.update_thread_label(thread_count)
         self.format_var.set(self.config.get("format", "Best Video"))
+        self.use_pot_var.set(self.config.get("use_pot", False))
 
     def save_settings_from_ui(self) -> None:
         self.config["path"] = self.entry_path.get().strip()
@@ -257,6 +261,7 @@ class App(ctk.CTk):
         self.config["multithread"] = self.multithread_var.get()
         self.config["threads"] = int(self.thread_slider.get())
         self.config["format"] = self.format_var.get()
+        self.config["use_pot"] = self.use_pot_var.get()
         save_config(self.config)
 
     def browse_directory(self) -> None:
@@ -324,12 +329,67 @@ def main():
     if not check_ffmpeg():
         handle_ffmpeg_not_found()
 
-    update_yt_dlp()
+    # update_yt_dlp() # Moved to specific modes
 
-    # CLI mode is not updated with new features in this pass
     if len(sys.argv) > 1:
-        print("CLI mode is not fully featured. Please run the GUI.")
+        parser = argparse.ArgumentParser(description="YouTube Downloader CLI")
+        parser.add_argument("url", help="Video or Playlist URL")
+        parser.add_argument("--path", required=True, help="Download output path")
+        parser.add_argument("--format", default="Best Video", choices=["Best Video", "1080p", "720p", "Audio (MP3)"], help="Download format")
+        parser.add_argument("--threads", type=int, default=5, help="Number of threads for playlist download")
+        parser.add_argument("--cookies", action="store_true", help="Use cookies.txt")
+        parser.add_argument("--zip", action="store_true", default=True, help="Zip files after download")
+        parser.add_argument("--no-zip", action="store_false", dest="zip", help="Do not zip files")
+        parser.add_argument("--pot", action="store_true", help="Use PotProvider")
+        
+        args = parser.parse_args()
+        
+        update_yt_dlp()
+
+        # Simple Logic to determine playlist vs video (rough check)
+        is_playlist = "playlist" in args.url or "list=" in args.url
+        
+        if is_playlist:
+            # For CLI playlist, we might need to fetch info first to get video list, 
+            # OR just pass the URL to a modified download_playlist that handles URLs directly?
+            # lib.py's download_playlist expects a list of dicts.
+            # We should probably add a helper or modify download_playlist to handle URL, 
+            # BUT for now, let's just fetch info here.
+            print("Analyzing playlist...")
+            info = get_playlist_info(args.url, args.cookies, args.pot)
+            if not info or 'entries' not in info:
+                print("Failed to get playlist info.")
+                sys.exit(1)
+            
+            videos = []
+            for i, entry in enumerate(info['entries']):
+                 if entry:
+                    videos.append({'url': entry['url'], 'title': entry.get('title', 'Unknown'), 'playlist_index': i + 1})
+            
+            print(f"Found {len(videos)} videos. Starting download...")
+            download_playlist(
+                videos_to_download=videos,
+                output_path=args.path,
+                use_cookies=args.cookies,
+                max_workers=args.threads,
+                zip_files=args.zip,
+                download_format=args.format,
+                use_pot=args.pot,
+                progress_hook=lambda d: print(f"[{d.get('status', 'INFO')}] {d.get('message', '')}")
+            )
+        else:
+             download_single_video(
+                video_url=args.url,
+                output_path=args.path,
+                use_cookies=args.cookies,
+                zip_files=args.zip,
+                download_format=args.format,
+                use_pot=args.pot,
+                progress_hook=lambda d: print(f"[{d.get('status', 'INFO')}] {d.get('message', '')}")
+             )
+
     else:
+        update_yt_dlp()
         ctk.set_appearance_mode("System")
         ctk.set_default_color_theme("blue")
         app = App()

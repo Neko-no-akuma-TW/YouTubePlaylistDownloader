@@ -19,13 +19,15 @@ FILES_PER_ZIP: int = 10
 
 # --- Helper Functions ---
 
-def get_playlist_info(playlist_url: str, use_cookies: bool) -> Optional[Dict[str, Any]]:
+def get_playlist_info(playlist_url: str, use_cookies: bool, use_pot: bool) -> Optional[Dict[str, Any]]:
     """獲取播放清單的資訊，但不下載影片。"""
     ydl_opts = {
         'extract_flat': True,
         'quiet': True,
         'cookiefile': 'cookies.txt' if use_cookies else None,
     }
+    if not use_pot:
+        ydl_opts['nop_plugins'] = True
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(playlist_url, download=False)
@@ -57,7 +59,7 @@ class ProgressLogger:
 
 # --- Core Download Functions ---
 
-def download_video(video_url: str, output_path: str, video_number: int, use_cookies: bool, download_format: str, progress_hook: Optional[Callable] = None) -> Optional[str]:
+def download_video(video_url: str, output_path: str, video_number: int, use_cookies: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> Optional[str]:
     format_opts = get_format_options(download_format)
     
     def hook(d):
@@ -74,10 +76,10 @@ def download_video(video_url: str, output_path: str, video_number: int, use_cook
         'postprocessors': format_opts.get('postprocessors', []) + ([{'key': 'FFmpegMetadata','add_metadata': True}] if "Audio" not in download_format else []),
         'progress_hooks': [hook],
         'logger': ProgressLogger(progress_hook),
-        'external_downloader': 'ffmpeg',
-        'hls_use_mpegts': True,
         'download_archive': os.path.join(output_path, 'downloaded.txt'),
     }
+    if not use_pot:
+        ydl_opts['nop_plugins'] = True
     ydl_opts.update(format_opts)
 
     try:
@@ -106,7 +108,7 @@ def download_video(video_url: str, output_path: str, video_number: int, use_cook
         if progress_hook: progress_hook({'status': 'error', 'message': str(e)})
         return None
 
-def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str, use_cookies: bool, max_workers: int, zip_files: bool, download_format: str, progress_hook: Optional[Callable] = None) -> None:
+def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str, use_cookies: bool, max_workers: int, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> None:
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
@@ -138,7 +140,7 @@ def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str
     if max_workers > 1:
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_video = {
-                executor.submit(download_video, video['url'], output_path, video['playlist_index'], use_cookies, download_format, progress_hook): video
+                executor.submit(download_video, video['url'], output_path, video['playlist_index'], use_cookies, download_format, use_pot, progress_hook): video
                 for video in videos_to_download
             }
             for i, future in enumerate(concurrent.futures.as_completed(future_to_video)):
@@ -155,7 +157,7 @@ def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str
     else:
         for i, video in enumerate(videos_to_download):
             if progress_hook: progress_hook({'status': 'info', 'message': f'Processing video {i+1}/{total_videos}: {video["title"]}'})
-            video_path = download_video(video['url'], output_path, video['playlist_index'], use_cookies, download_format, progress_hook)
+            video_path = download_video(video['url'], output_path, video['playlist_index'], use_cookies, download_format, use_pot, progress_hook)
             if video_path:
                 files_to_process.append(video_path)
                 if zip_files and len(files_to_process) >= FILES_PER_ZIP:
@@ -169,11 +171,11 @@ def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str
     if progress_hook: progress_hook({'status': 'all_finished', 'message': 'All tasks completed.'})
 
 
-def download_single_video(video_url: str, output_path: str, use_cookies: bool, zip_files: bool, download_format: str, progress_hook: Optional[Callable] = None) -> None:
+def download_single_video(video_url: str, output_path: str, use_cookies: bool, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> None:
     if not os.path.exists(output_path):
         os.makedirs(output_path)
     
-    video_path = download_video(video_url, output_path, 1, use_cookies, download_format, progress_hook)
+    video_path = download_video(video_url, output_path, 1, use_cookies, download_format, use_pot, progress_hook)
 
     if zip_files and video_path:
         if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Zipping file...'})

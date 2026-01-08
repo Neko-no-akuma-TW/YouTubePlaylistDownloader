@@ -4,5 +4,6 @@
     "multithread": false,
     "threads": 4,
     "zip_files": false,
-    "format": "Best Video"
+    "format": "Best Video",
+    "use_pot": true
 }
