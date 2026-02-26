@@ -42,13 +42,13 @@ def handle_ffmpeg_not_found() -> None:
 
 class App(ctk.CTk):
     def __init__(self) -> None:
-        super().__init__(fg_color="white")
+        super().__init__()
         self.config = load_config()
         self.progress_queue = Queue()
         self.video_checkboxes: List[ctk.CTkCheckBox] = []
 
         self.title("YouTube Downloader")
-        self.geometry(f"{800}x900")
+        self.geometry(f"{800}x600")
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.grid_columnconfigure(0, weight=1)
 
@@ -57,13 +57,13 @@ class App(ctk.CTk):
         self.label = ctk.CTkLabel(self, text="YouTube Downloader", font=ctk.CTkFont(size=20, weight="bold"))
         self.label.grid(row=0, column=0, columnspan=3, padx=20, pady=10)
 
-        self.mode_button = ctk.CTkSegmentedButton(self, values=["Video", "Playlist"], command=self.toggle_mode)
+        self.mode_button = ctk.CTkSegmentedButton(self, values=["Video", "Playlist", "Channel"], command=self.toggle_mode)
         self.mode_button.grid(row=1, column=0, columnspan=3, padx=20, pady=10, sticky="ew")
 
         self.url_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.url_frame.grid(row=2, column=0, columnspan=3, padx=20, pady=10, sticky="ew")
         self.url_frame.grid_columnconfigure(0, weight=1)
-        self.entry_url = ctk.CTkEntry(self.url_frame, placeholder_text="影片或播放清單 URL")
+        self.entry_url = ctk.CTkEntry(self.url_frame, placeholder_text="請輸入影片 URL")
         self.entry_url.grid(row=0, column=0, sticky="ew")
         self.analyze_button = ctk.CTkButton(self.url_frame, text="分析", width=80, command=self.analyze_playlist)
         self.analyze_button.grid(row=0, column=1, padx=(10, 0))
@@ -138,17 +138,27 @@ class App(ctk.CTk):
 
     def toggle_mode(self, mode: str):
         is_playlist = mode == "Playlist"
-        self.analyze_button.configure(state=tk.NORMAL if is_playlist else tk.DISABLED)
-        self.multithread_checkbox.configure(state=tk.NORMAL if is_playlist else tk.DISABLED)
-        if not is_playlist:
+        if mode == "Video":
+            self.entry_url.configure(placeholder_text="請輸入影片 URL")
             self.multithread_var.set(False)
+            self.multithread_checkbox.configure(state=tk.DISABLED)
+            self.analyze_button.configure(state=tk.DISABLED)
             # Hide playlist frame
             self.playlist_frame.grid_remove()
             self.grid_rowconfigure(6, weight=0)
-        else:
+        elif mode == "Playlist":
+            self.multithread_checkbox.configure(state=tk.NORMAL)
+            self.analyze_button.configure(state=tk.NORMAL)
             # Show playlist frame
+            self.entry_url.configure(placeholder_text="請輸入播放清單 URL")
             self.playlist_frame.grid()
             self.grid_rowconfigure(6, weight=1)
+        else:
+            self.multithread_checkbox.configure(state=tk.NORMAL)
+            self.analyze_button.configure(state=tk.NORMAL)
+            # Show playlist frame
+            self.entry_url.configure(placeholder_text="請輸入頻道 URL")
+            
         self.toggle_multithread_options()
 
     def analyze_playlist(self):
@@ -244,6 +254,7 @@ class App(ctk.CTk):
         self.destroy()
 
     def load_settings_to_ui(self) -> None:
+        self.mode_button.set("Video")
         self.entry_path.insert(0, self.config.get("path", ""))
         self.use_cookies_var.set(self.config.get("use_cookies", False))
         self.zip_files_var.set(self.config.get("zip_files", True))
