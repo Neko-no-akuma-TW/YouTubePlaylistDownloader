@@ -34,6 +34,18 @@ def get_playlist_info(playlist_url: str, use_cookies: bool, use_pot: bool) -> Op
     except Exception as e:
         print(f"解析播放清單失敗: {e}")
         return None
+    
+def channel_info(channel_url: str):
+    ydl_opts = {
+        'quiet': True,
+        'extract_flat': True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(channel_url, download=False)
+            return info
+    except yt_dlp.utils.DownloadError as e:
+        return None
 
 def get_format_options(format_selection: str) -> Dict[str, Any]:
     if format_selection == "Audio (MP3)":

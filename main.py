@@ -48,7 +48,7 @@ class App(ctk.CTk):
         self.video_checkboxes: List[ctk.CTkCheckBox] = []
 
         self.title("YouTube Downloader")
-        self.geometry(f"{800}x600")
+        self.geometry(f"{800}x700")
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.grid_columnconfigure(0, weight=1)
 
@@ -65,7 +65,7 @@ class App(ctk.CTk):
         self.url_frame.grid_columnconfigure(0, weight=1)
         self.entry_url = ctk.CTkEntry(self.url_frame, placeholder_text="請輸入影片 URL")
         self.entry_url.grid(row=0, column=0, sticky="ew")
-        self.analyze_button = ctk.CTkButton(self.url_frame, text="分析", width=80, command=self.analyze_playlist)
+        self.analyze_button = ctk.CTkButton(self.url_frame, text="分析", width=80, command=self.analyze_btn_click)
         self.analyze_button.grid(row=0, column=1, padx=(10, 0))
 
         # ... (Path, Format, and other options)
@@ -122,6 +122,22 @@ class App(ctk.CTk):
         self.video_list_frame.pack(fill="both", expand=True, pady=(10,0))
         self.grid_rowconfigure(6, weight=1)
 
+        # Channel Frame
+        self.channel_frame = ctk.CTkFrame(self)
+        self.channel_frame.grid(row=6, column=0, columnspan=3, padx=20, pady=10, sticky="nsew")
+        self.channel_frame.grid_columnconfigure(0, weight=1)
+        channel_label = ctk.CTkLabel(self.channel_frame, anchor="w", text="下載類型")
+        channel_label.pack(fill="x", pady=(5,5))
+        self.dl_shorts_var = tk.BooleanVar()
+        self.dl_shorts_checkbox = ctk.CTkCheckBox(self.channel_frame, text="shorts", variable=self.dl_shorts_var)
+        self.dl_shorts_checkbox.pack(side="left", padx=(0, 30), pady=(0,5))
+        self.dl_videos_var = tk.BooleanVar()
+        self.dl_videos_checkbox = ctk.CTkCheckBox(self.channel_frame, text="影片", variable=self.dl_videos_var)
+        self.dl_videos_checkbox.pack(side="left", padx=(0, 30), pady=(0,5))
+        self.dl_streams_var = tk.BooleanVar()
+        self.dl_streams_checkbox = ctk.CTkCheckBox(self.channel_frame, text="直播", variable=self.dl_streams_var)
+        self.dl_streams_checkbox.pack(side="left", padx=(0, 30), pady=(0,5))
+
         # --- Bottom Widgets ---
         self.download_button = ctk.CTkButton(self, text="下載", command=self.start_download)
         self.download_button.grid(row=7, column=0, columnspan=3, padx=20, pady=10, sticky="ew")
@@ -138,46 +154,58 @@ class App(ctk.CTk):
 
     def toggle_mode(self, mode: str):
         is_playlist = mode == "Playlist"
+        self.multithread_checkbox.configure(state=tk.DISABLED if mode == "Video" else tk.NORMAL)
+        self.analyze_button.configure(state=tk.DISABLED if mode == "Video" else tk.NORMAL)
         if mode == "Video":
             self.entry_url.configure(placeholder_text="請輸入影片 URL")
             self.multithread_var.set(False)
-            self.multithread_checkbox.configure(state=tk.DISABLED)
-            self.analyze_button.configure(state=tk.DISABLED)
             # Hide playlist frame
             self.playlist_frame.grid_remove()
+            self.channel_frame.grid_remove()
             self.grid_rowconfigure(6, weight=0)
         elif mode == "Playlist":
-            self.multithread_checkbox.configure(state=tk.NORMAL)
-            self.analyze_button.configure(state=tk.NORMAL)
             # Show playlist frame
             self.entry_url.configure(placeholder_text="請輸入播放清單 URL")
+            self.channel_frame.grid_remove()
             self.playlist_frame.grid()
             self.grid_rowconfigure(6, weight=1)
         else:
-            self.multithread_checkbox.configure(state=tk.NORMAL)
-            self.analyze_button.configure(state=tk.NORMAL)
             # Show playlist frame
             self.entry_url.configure(placeholder_text="請輸入頻道 URL")
+            self.playlist_frame.grid_remove()
+            self.channel_frame.grid()
+            self.grid_rowconfigure(6, weight=0)
             
         self.toggle_multithread_options()
 
-    def analyze_playlist(self):
+    def analyze_btn_click(self):
         url = self.entry_url.get().strip()
         if not url:
-            messagebox.showerror("錯誤", "請先輸入播放清單 URL")
+            messagebox.showerror("錯誤", "請先輸入播放清單 URL" if self.mode_button.get()=="Playlist" else "請先輸入頻道 URL")
             return
-        
-        self.log("正在分析播放清單...")
+
+        self.log("正在分析...")
         self.analyze_button.configure(state=tk.DISABLED)
-        # Clear old checkboxes
-        for checkbox in self.video_checkboxes:
-            checkbox.destroy()
-        self.video_checkboxes.clear()
+        if self.mode_button.get()=="Playlist":
+            # Clear old checkboxes
+            for checkbox in self.video_checkboxes:
+                checkbox.destroy()
+            self.video_checkboxes.clear()
 
-        analysis_thread = threading.Thread(target=self.run_analysis, args=(url,))
-        analysis_thread.start()
+            analysis_thread = threading.Thread(target=self.run_playlist_analysis, args=(url,))
+            analysis_thread.start()
+        else:
+            analysis_thread = threading.Thread(target=self.run_channel_analysis, daemon=True, args=(url,))
+            analysis_thread.start()
 
-    def run_analysis(self, url: str):
+    def run_channel_analysis(self, url: str):
+        info = channel_info(url)
+        if info:
+            self.log("取得頻道成功，頻道名稱：" + info.get('title'))
+        else:
+            self.log("取得頻道失敗")
+
+    def run_playlist_analysis(self, url: str):
         playlist_info = get_playlist_info(url, self.use_cookies_var.get(), self.use_pot_var.get())
         self.after(0, self.populate_playlist_frame, playlist_info)
 
