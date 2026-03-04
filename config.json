@@ -1,9 +1,9 @@
 {
-    "path": "E:/code/Python/YouTubePlaylistDownloader",
-    "use_cookies": true,
+    "path": "C:/Users/\u963f\u7c73\u5df4/Desktop",
+    "use_cookies": false,
     "multithread": false,
     "threads": 4,
     "zip_files": false,
-    "format": "Best Video",
-    "use_pot": true
+    "format": "720p",
+    "use_pot": false
 }
