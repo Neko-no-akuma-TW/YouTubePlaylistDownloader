@@ -78,7 +78,7 @@ def download_video(video_url: str, output_path: str, video_number: int, use_cook
         if progress_hook: progress_hook(d)
 
     ydl_opts = {
-        'outtmpl': os.path.join(output_path, f'{video_number:03d}-%(title)s.%(ext)s'),
+        'outtmpl': os.path.join(output_path, f'{video_number:03d}-' if video_number > 0 else '' + '%(title)s.%(ext)s'),
         'writesubtitles': True,
         'subtitleslangs': SUPPORTED_SUB_LANGS,
         'subtitlesformat': 'vtt/srt',
@@ -182,12 +182,28 @@ def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str
     cleanup_temp_files(output_path)
     if progress_hook: progress_hook({'status': 'all_finished', 'message': 'All tasks completed.'})
 
+def download_channel(channel_url: str, output_path: str, dl_type: dict[str, bool], 
+                     use_cookies: bool, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> None:
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+    for key, value in dl_type.items():
+        if value:
+            video_path = download_video(channel_url + "/" + key, output_path, 0, use_cookies, download_format, use_pot, progress_hook)
+            if zip_files and video_path:
+                if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Zipping file...'})
+                base_name = os.path.splitext(os.path.basename(video_path))[0]
+                zip_name = f"{base_name}.zip"
+                zip_and_cleanup_files([video_path], zip_name, output_path)
+
+            if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Cleaning up temporary files...'})
+            cleanup_temp_files(output_path)
+            if progress_hook: progress_hook({'status': 'all_finished', 'message': 'All tasks completed.'})
+
 
 def download_single_video(video_url: str, output_path: str, use_cookies: bool, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> None:
     if not os.path.exists(output_path):
         os.makedirs(output_path)
-    
-    video_path = download_video(video_url, output_path, 1, use_cookies, download_format, use_pot, progress_hook)
+    video_path = download_video(video_url, output_path, 0, use_cookies, download_format, use_pot, progress_hook)
 
     if zip_files and video_path:
         if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Zipping file...'})

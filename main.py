@@ -159,18 +159,18 @@ class App(ctk.CTk):
         if mode == "Video":
             self.entry_url.configure(placeholder_text="請輸入影片 URL")
             self.multithread_var.set(False)
-            # Hide playlist frame
+            # Hide playlist frame, hide channel frame
             self.playlist_frame.grid_remove()
             self.channel_frame.grid_remove()
             self.grid_rowconfigure(6, weight=0)
         elif mode == "Playlist":
-            # Show playlist frame
+            # Show playlist frame, hide channel frame
             self.entry_url.configure(placeholder_text="請輸入播放清單 URL")
             self.channel_frame.grid_remove()
             self.playlist_frame.grid()
             self.grid_rowconfigure(6, weight=1)
         else:
-            # Show playlist frame
+            # Hide playlist frame, show channel frame
             self.entry_url.configure(placeholder_text="請輸入頻道 URL")
             self.playlist_frame.grid_remove()
             self.channel_frame.grid()
@@ -200,10 +200,13 @@ class App(ctk.CTk):
 
     def run_channel_analysis(self, url: str):
         info = channel_info(url)
-        if info:
-            self.log("取得頻道成功，頻道名稱：" + info.get('title'))
-        else:
-            self.log("取得頻道失敗")
+        try:
+            if info:
+                self.log("取得頻道成功，頻道名稱：" + info.get('title'))
+            else:
+                self.log("取得頻道失敗")
+        except Exception as e:
+            self.log("分析失敗：" + str(e))
 
     def run_playlist_analysis(self, url: str):
         playlist_info = get_playlist_info(url, self.use_cookies_var.get(), self.use_pot_var.get())
@@ -263,7 +266,7 @@ class App(ctk.CTk):
         if mode == "Video":
             args["video_url"] = url
             target = download_single_video
-        else: # Playlist
+        elif mode == "Playlist": # Playlist
             videos_to_download = [cb.video_info for cb in self.video_checkboxes if cb.get() == 1]
             if not videos_to_download:
                 messagebox.showwarning("提示", "請至少選擇一個播放清單中的影片。\n")
@@ -272,6 +275,17 @@ class App(ctk.CTk):
             args["videos_to_download"] = videos_to_download
             args["max_workers"] = int(self.thread_slider.get()) if self.multithread_var.get() else 1
             target = download_playlist
+        else:   # Channel
+            if (self.dl_shorts_var.get() or self.dl_videos_var.get() or self.dl_streams_var.get()) == False:
+                messagebox.showwarning("提示", "請至少選擇一個下載類型。\n")
+                self.download_button.configure(state=tk.NORMAL)
+                return
+            args["channel_url"] = url if len(url.split("/")) < 3 else "/".join(url.split("/")[:4])
+            args["dl_type"] = {"shorts": self.dl_shorts_var.get(),
+                               "videos": self.dl_videos_var.get(),
+                               "streams": self.dl_streams_var.get()}
+            target = download_channel
+
 
         download_thread = threading.Thread(target=target, kwargs=args)
         download_thread.start()
