@@ -47,9 +47,8 @@ PS: 如果你在使用Cookie後有出現警告，可以使用這個[專案](http
 
 ## 感謝以下的協作者們
 因為有你們，所以這個專案才會變得更好。<br/>
-<a href="https://github.com/Neko-no-akuma-TW/YouTubePlaylistDownloader/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Neko-no-akuma-TW/YouTubePlaylistDownloader" />
-</a>
+<!-- readme: collaborators,contributors -start -->
+<!-- readme: collaborators,contributors -end -->
 
 ---
 
