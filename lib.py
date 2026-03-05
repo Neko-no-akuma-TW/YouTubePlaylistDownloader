@@ -78,7 +78,7 @@ def download_video(video_url: str, output_path: str, video_number: int, use_cook
         if progress_hook: progress_hook(d)
 
     ydl_opts = {
-        'outtmpl': os.path.join(output_path, f'{video_number:03d}-' if video_number > 0 else '' + '%(title)s.%(ext)s'),
+        'outtmpl': os.path.join(output_path, (f'{video_number:03d}-' if video_number > 0 else '') + '%(title)s.%(ext)s'),
         'writesubtitles': True,
         'subtitleslangs': SUPPORTED_SUB_LANGS,
         'subtitlesformat': 'vtt/srt',
