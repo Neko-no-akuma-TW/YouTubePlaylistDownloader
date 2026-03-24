@@ -281,6 +281,7 @@ class App(ctk.CTk):
                 self.download_button.configure(state=tk.NORMAL)
                 return
             args["channel_url"] = url if len(url.split("/")) < 3 else "/".join(url.split("/")[:4])
+            args["max_workers"] = int(self.thread_slider.get()) if self.multithread_var.get() else 1
             args["dl_type"] = {"shorts": self.dl_shorts_var.get(),
                                "videos": self.dl_videos_var.get(),
                                "streams": self.dl_streams_var.get()}
@@ -324,7 +325,7 @@ class App(ctk.CTk):
             self.entry_path.insert(0, directory)
 
     def toggle_multithread_options(self) -> None:
-        is_multithread_enabled = self.multithread_var.get() and self.mode_button.get() == "Playlist"
+        is_multithread_enabled = self.multithread_var.get() and self.mode_button.get() in ["Playlist", "Channel"]
         self.thread_slider_label.configure(state=tk.NORMAL if is_multithread_enabled else tk.DISABLED)
         self.thread_slider.configure(state=tk.NORMAL if is_multithread_enabled else tk.DISABLED)
 

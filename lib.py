@@ -120,15 +120,15 @@ def download_video(video_url: str, output_path: str, video_number: int, use_cook
         if progress_hook: progress_hook({'status': 'error', 'message': str(e)})
         return None
 
-def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str, use_cookies: bool, max_workers: int, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> None:
+def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str, use_cookies: bool, max_workers: int, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None, playlist_title_override: Optional[str] = None) -> None:
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
     files_to_process: List[str] = []
     zip_counter = 1
     # Assuming the playlist title can be inferred from the first video's info or passed differently
-    playlist_title = "playlist" 
-    if videos_to_download:
+    playlist_title = playlist_title_override or "playlist" 
+    if videos_to_download and not playlist_title_override:
         # A bit of a hack to get a playlist title if possible
         with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True}) as ydl:
             try:
@@ -183,21 +183,35 @@ def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str
     if progress_hook: progress_hook({'status': 'all_finished', 'message': 'All tasks completed.'})
 
 def download_channel(channel_url: str, output_path: str, dl_type: dict[str, bool], 
-                     use_cookies: bool, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> None:
+                     use_cookies: bool, max_workers: int, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> None:
     if not os.path.exists(output_path):
         os.makedirs(output_path)
+    
     for key, value in dl_type.items():
         if value:
-            video_path = download_video(channel_url + "/" + key, output_path, 0, use_cookies, download_format, use_pot, progress_hook)
-            if zip_files and video_path:
-                if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Zipping file...'})
-                base_name = os.path.splitext(os.path.basename(video_path))[0]
-                zip_name = f"{base_name}.zip"
-                zip_and_cleanup_files([video_path], zip_name, output_path)
-
-            if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Cleaning up temporary files...'})
-            cleanup_temp_files(output_path)
-            if progress_hook: progress_hook({'status': 'all_finished', 'message': 'All tasks completed.'})
+            target_url = f"{channel_url}/{key}"
+            if progress_hook: progress_hook({'status': 'info', 'message': f'Analyzing {key} list...'})
+            
+            info = get_playlist_info(target_url, use_cookies, use_pot)
+            if not info or 'entries' not in info:
+                if progress_hook: progress_hook({'status': 'error', 'message': f'Failed to get videos for {key}'})
+                continue
+            
+            entries = info['entries']
+            if not entries: continue
+            
+            videos_to_download = []
+            for i, entry in enumerate(entries):
+                if entry and entry.get('url'):
+                    videos_to_download.append({
+                        'url': entry.get('url'),
+                        'title': entry.get('title', 'Unknown'),
+                        'playlist_index': i + 1,
+                        'webpage_url': entry.get('url')
+                    })
+            
+            channel_title = sanitize_filename(info.get('title', 'channel'))
+            download_playlist(videos_to_download, output_path, use_cookies, max_workers, zip_files, download_format, use_pot, progress_hook, playlist_title_override=f"{channel_title}_{key}")
 
 
 def download_single_video(video_url: str, output_path: str, use_cookies: bool, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> None:
