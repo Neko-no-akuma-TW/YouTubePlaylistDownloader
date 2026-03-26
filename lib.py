@@ -11,10 +11,18 @@ import time
 import zipfile
 from typing import List, Dict, Any, Optional, Callable
 
+# --- Version Check ---
+if sys.version_info < (3, 10):
+    print("[WARNING] Your Python version is 3.9 or below. yt-dlp has deprecated support for Python 3.9.")
+    print("[WARNING] Please upgrade to Python 3.10 or above for optimal compatibility.")
+    print("[INFO] Current version: Python {}.{}".format(sys.version_info.major, sys.version_info.minor))
+
 # --- Constants ---
 SUPPORTED_SUB_LANGS: List[str] = ['zh.TW', 'zh.CN', 'en', 'ja']
 SUB_EXTENSIONS: List[str] = ['.vtt', '.srt']
-TEMP_FILE_PATTERNS: List[str] = ["*.temp.mp4", "*.webp", "*.jpg", "*.metadata.json"]
+# Only delete actual temporary files, NOT thumbnails (webp/jpg are valid downloads)
+TEMP_FILE_PATTERNS: List[str] = ["*.temp.mp4", "*.metadata.json", "*.[0-9][0-9][0-9]"]
+THUMBNAIL_PATTERNS: List[str] = ["*.webp", "*.jpg"]  # Keep these as they are thumbnails
 FILES_PER_ZIP: int = 10
 
 # --- Helper Functions ---
@@ -28,11 +36,15 @@ def get_playlist_info(playlist_url: str, use_cookies: bool, use_pot: bool) -> Op
     }
     if not use_pot:
         ydl_opts['nop_plugins'] = True
+    else:
+        ydl_opts['quiet'] = False  # Show messages for PotProvider debugging
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(playlist_url, download=False)
     except Exception as e:
         print(f"解析播放清單失敗: {e}")
+        if use_pot:
+            print(f"[提示] 如果 PotProvider 伺服器未運行，請禁用「使用 PotProvider」選項")
         return None
     
 def channel_info(channel_url: str):
@@ -63,19 +75,30 @@ def get_format_options(format_selection: str) -> Dict[str, Any]:
 class ProgressLogger:
     def __init__(self, progress_hook: Optional[Callable] = None):
         self.progress_hook = progress_hook
-    def debug(self, msg): pass
-    def warning(self, msg):
-        if self.progress_hook: self.progress_hook({'status': 'warning', 'message': msg})
-    def error(self, msg):
+    def debug(self, msg, **kwargs): 
+        pass
+    def warning(self, msg, **kwargs):
+        # Filter out non-critical warnings
+        if self.progress_hook:
+            # Show important warnings, suppress verbose ones
+            if "Deprecated Feature" not in msg:  # Filter out Python version warnings (already shown)
+                self.progress_hook({'status': 'warning', 'message': msg})
+    def error(self, msg, **kwargs):
         if self.progress_hook: self.progress_hook({'status': 'error', 'message': msg})
 
 # --- Core Download Functions ---
 
-def download_video(video_url: str, output_path: str, video_number: int, use_cookies: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> Optional[str]:
+def download_video(video_url: str, output_path: str, video_number: int, use_cookies: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None, write_info_json: bool = True) -> Optional[str]:
     format_opts = get_format_options(download_format)
     
     def hook(d):
         if progress_hook: progress_hook(d)
+
+    # Build postprocessors list
+    postprocessors = format_opts.get('postprocessors', [])
+    if "Audio" not in download_format:
+        # Add FFmpeg metadata processor for video files
+        postprocessors.append({'key': 'FFmpegMetadata', 'add_metadata': True})
 
     ydl_opts = {
         'outtmpl': os.path.join(output_path, (f'{video_number:03d}-' if video_number > 0 else '') + '%(title)s.%(ext)s'),
@@ -83,12 +106,15 @@ def download_video(video_url: str, output_path: str, video_number: int, use_cook
         'subtitleslangs': SUPPORTED_SUB_LANGS,
         'subtitlesformat': 'vtt/srt',
         'writethumbnail': "Audio" not in download_format,
+        'writeinfojson': write_info_json,  # Download video info as JSON
+        'writeoriginalurl': True,  # Write original URL for reference
         'skip_download': False,
         'cookiefile': 'cookies.txt' if use_cookies else None,
-        'postprocessors': format_opts.get('postprocessors', []) + ([{'key': 'FFmpegMetadata','add_metadata': True}] if "Audio" not in download_format else []),
+        'postprocessors': postprocessors,
         'progress_hooks': [hook],
         'logger': ProgressLogger(progress_hook),
         'download_archive': os.path.join(output_path, 'downloaded.txt'),
+        'skip_unavailable_fragments': True,  # Skip unavailable fragments robustly
     }
     if not use_pot:
         ydl_opts['nop_plugins'] = True
@@ -110,17 +136,54 @@ def download_video(video_url: str, output_path: str, video_number: int, use_cook
 
         video_path = filename
         if "Audio" not in download_format:
-            if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Embedding thumbnail...'})
-            # ... (thumbnail and chapter logic)
+            # Try to embed thumbnail into video
+            base, _ = os.path.splitext(video_path)
+            # Look for thumbnail files (webp or jpg)
+            thumbnail_file = None
+            for thumb_ext in ['.webp', '.jpg', '.png']:
+                potential_thumb = base + thumb_ext
+                if os.path.exists(potential_thumb):
+                    thumbnail_file = potential_thumb
+                    break
+            
+            if thumbnail_file:
+                if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Embedding thumbnail into video...'})
+                if embed_thumbnail_to_video(video_path, thumbnail_file):
+                    if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Thumbnail embedded successfully'})
+                else:
+                    if progress_hook: progress_hook({'status': 'info', 'message': f'Thumbnail file preserved: {os.path.basename(thumbnail_file)}'})
         
         if progress_hook: progress_hook({'status': 'finished_video', 'message': f"Finished: {os.path.basename(video_path)}"})
         return video_path
 
     except Exception as e:
-        if progress_hook: progress_hook({'status': 'error', 'message': str(e)})
+        error_msg = str(e)
+        # More informative error messages
+        if "127.0.0.1:4416" in error_msg or "PotProvider" in error_msg.lower() or "TransportError" in error_msg:
+            if progress_hook: 
+                progress_hook({'status': 'warning', 'message': 'PotProvider 伺服器未運行或無法連線。將使用普通模式繼續下載。'})
+                progress_hook({'status': 'warning', 'message': '如需使用 PotProvider，請啟動本地伺服器：python -m http.server 4416'})
+            # Try again without PotProvider
+            if use_pot:
+                ydl_opts['nop_plugins'] = True
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(video_url, download=True)
+                        filename = ydl.prepare_filename(info)
+                    final_ext = ".mp3" if "Audio" in download_format else ".mp4"
+                    if not filename.endswith(final_ext):
+                         base, _ = os.path.splitext(filename)
+                         filename = base + final_ext
+                    if os.path.exists(filename):
+                        if progress_hook: progress_hook({'status': 'finished_video', 'message': f"Finished (without PotProvider): {os.path.basename(filename)}"})
+                        return filename
+                except Exception as retry_e:
+                    if progress_hook: progress_hook({'status': 'error', 'message': f'重試失敗: {str(retry_e)}'})
+                    return None
+        if progress_hook: progress_hook({'status': 'error', 'message': error_msg})
         return None
 
-def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str, use_cookies: bool, max_workers: int, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None, playlist_title_override: Optional[str] = None) -> None:
+def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str, use_cookies: bool, max_workers: int, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None, playlist_title_override: Optional[str] = None, write_info_json: bool = True) -> None:
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
@@ -152,7 +215,7 @@ def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str
     if max_workers > 1:
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_video = {
-                executor.submit(download_video, video['url'], output_path, video['playlist_index'], use_cookies, download_format, use_pot, progress_hook): video
+                executor.submit(download_video, video['url'], output_path, video['playlist_index'], use_cookies, download_format, use_pot, progress_hook, write_info_json): video
                 for video in videos_to_download
             }
             for i, future in enumerate(concurrent.futures.as_completed(future_to_video)):
@@ -169,7 +232,7 @@ def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str
     else:
         for i, video in enumerate(videos_to_download):
             if progress_hook: progress_hook({'status': 'info', 'message': f'Processing video {i+1}/{total_videos}: {video["title"]}'})
-            video_path = download_video(video['url'], output_path, video['playlist_index'], use_cookies, download_format, use_pot, progress_hook)
+            video_path = download_video(video['url'], output_path, video['playlist_index'], use_cookies, download_format, use_pot, progress_hook, write_info_json)
             if video_path:
                 files_to_process.append(video_path)
                 if zip_files and len(files_to_process) >= FILES_PER_ZIP:
@@ -183,7 +246,7 @@ def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str
     if progress_hook: progress_hook({'status': 'all_finished', 'message': 'All tasks completed.'})
 
 def download_channel(channel_url: str, output_path: str, dl_type: dict[str, bool], 
-                     use_cookies: bool, max_workers: int, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> None:
+                     use_cookies: bool, max_workers: int, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None, write_info_json: bool = True) -> None:
     if not os.path.exists(output_path):
         os.makedirs(output_path)
     
@@ -211,13 +274,13 @@ def download_channel(channel_url: str, output_path: str, dl_type: dict[str, bool
                     })
             
             channel_title = sanitize_filename(info.get('title', 'channel'))
-            download_playlist(videos_to_download, output_path, use_cookies, max_workers, zip_files, download_format, use_pot, progress_hook, playlist_title_override=f"{channel_title}_{key}")
+            download_playlist(videos_to_download, output_path, use_cookies, max_workers, zip_files, download_format, use_pot, progress_hook, playlist_title_override=f"{channel_title}_{key}", write_info_json=write_info_json)
 
 
-def download_single_video(video_url: str, output_path: str, use_cookies: bool, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None) -> None:
+def download_single_video(video_url: str, output_path: str, use_cookies: bool, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None, write_info_json: bool = True) -> None:
     if not os.path.exists(output_path):
         os.makedirs(output_path)
-    video_path = download_video(video_url, output_path, 0, use_cookies, download_format, use_pot, progress_hook)
+    video_path = download_video(video_url, output_path, 0, use_cookies, download_format, use_pot, progress_hook, write_info_json)
 
     if zip_files and video_path:
         if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Zipping file...'})
@@ -237,6 +300,45 @@ def update_yt_dlp():
     except Exception as e:
         print(f"Failed to update yt-dlp: {e}")
 def sanitize_filename(filename: str) -> str: return re.sub(r'[\/*?:"<>|]', "", filename)
+def embed_thumbnail_to_video(video_path: str, thumbnail_path: str) -> bool:
+    """使用 FFmpeg 將縮圖嵌入到 MP4 檔案中。"""
+    if not os.path.exists(video_path) or not os.path.exists(thumbnail_path):
+        return False
+    
+    try:
+        # Create temporary output file
+        temp_output = video_path + ".tmp.mp4"
+        
+        # Use FFmpeg to embed thumbnail as cover art
+        cmd = [
+            'ffmpeg',
+            '-i', video_path,
+            '-i', thumbnail_path,
+            '-c', 'copy',  # Copy streams without re-encoding
+            '-map', '0',
+            '-map', '1',
+            '-c:v:1', 'mjpeg',  # Set picture codec
+            '-disposition:v:1', 'attached_pic',  # Mark as cover art
+            '-y',  # Overwrite output
+            temp_output
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        
+        if result.returncode == 0 and os.path.exists(temp_output):
+            # Replace original with embedded version
+            os.remove(video_path)
+            os.rename(temp_output, video_path)
+            return True
+        else:
+            # Cleanup temp file if failed
+            if os.path.exists(temp_output):
+                os.remove(temp_output)
+            return False
+    except Exception as e:
+        print(f"[警告] 縮圖嵌入失敗: {e}")
+        return False
+
 def set_thumbnail(video_path: str, thumbnail_path: str): pass
 def embed_chapters(video_path: str, chapters: List[Dict[str, Any]]): pass
 def zip_and_cleanup_files(file_list: List[str], zip_name: str, output_path: str):
@@ -257,7 +359,8 @@ def zip_and_cleanup_files(file_list: List[str], zip_name: str, output_path: str)
             except OSError as e:
                 print(f"Error removing original file {file}: {e}")
 def cleanup_temp_files(output_path: str):
-    """Deletes temporary files from the output directory."""
+    """Deletes temporary files from the output directory, but preserves thumbnails."""
+    # Only delete actual temporary files
     for pattern in TEMP_FILE_PATTERNS:
         for file_path in glob.glob(os.path.join(output_path, pattern)):
             try:
@@ -265,3 +368,6 @@ def cleanup_temp_files(output_path: str):
                 print(f"Removed temp file: {file_path}")
             except OSError as e:
                 print(f"Error removing temp file {file_path}: {e}")
+    
+    # Keep thumbnail files (.webp, .jpg) - do NOT delete them
+    print(f"[Info] Thumbnail files (.webp, .jpg) preserved in output directory")
