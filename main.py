@@ -63,7 +63,7 @@ class App(ctk.CTk):
             self.version_label = ctk.CTkLabel(self, text=version_warning, text_color="orange", font=ctk.CTkFont(size=10))
             self.version_label.grid(row=0, column=3, columnspan=2, padx=20, pady=(10, 0))
 
-        self.mode_button = ctk.CTkSegmentedButton(self, values=["Video", "Playlist", "Channel"], command=self.toggle_mode)
+        self.mode_button = ctk.CTkSegmentedButton(self, values=["Video", "Playlist", "Channel", "Streaming"], command=self.toggle_mode)
         self.mode_button.grid(row=1, column=0, columnspan=3, padx=20, pady=10, sticky="ew")
 
         self.url_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -150,6 +150,9 @@ class App(ctk.CTk):
         self.dl_streams_checkbox = ctk.CTkCheckBox(self.channel_frame, text="直播", variable=self.dl_streams_var)
         self.dl_streams_checkbox.pack(side="left", padx=(0, 30), pady=(0,5))
 
+        # Streaming
+        self.stop_streaming = False
+
         # --- Bottom Widgets ---
         self.download_button = ctk.CTkButton(self, text="下載", command=self.start_download)
         self.download_button.grid(row=7, column=0, columnspan=3, padx=20, pady=10, sticky="ew")
@@ -166,27 +169,40 @@ class App(ctk.CTk):
 
     def toggle_mode(self, mode: str):
         is_playlist = mode == "Playlist"
-        self.multithread_checkbox.configure(state=tk.DISABLED if mode == "Video" else tk.NORMAL)
         self.analyze_button.configure(state=tk.DISABLED if mode == "Video" else tk.NORMAL)
         if mode == "Video":
             self.entry_url.configure(placeholder_text="請輸入影片 URL")
-            self.multithread_var.set(False)
             # Hide playlist frame, hide channel frame
             self.playlist_frame.grid_remove()
             self.channel_frame.grid_remove()
+            self.analyze_button.configure(state=tk.DISABLED)
+            self.multithread_var.set(False)
+            self.multithread_checkbox.configure(state=tk.DISABLED)
             self.grid_rowconfigure(6, weight=0)
         elif mode == "Playlist":
             # Show playlist frame, hide channel frame
             self.entry_url.configure(placeholder_text="請輸入播放清單 URL")
             self.channel_frame.grid_remove()
             self.playlist_frame.grid()
+            self.analyze_button.configure(state=tk.NORMAL)
+            self.multithread_checkbox.configure(state=tk.NORMAL)
             self.grid_rowconfigure(6, weight=1)
-        else:
+        elif mode == "Channel":
             # Hide playlist frame, show channel frame
             self.entry_url.configure(placeholder_text="請輸入頻道 URL")
             self.playlist_frame.grid_remove()
             self.channel_frame.grid()
+            self.analyze_button.configure(state=tk.NORMAL)
+            self.multithread_checkbox.configure(state=tk.NORMAL)
             self.grid_rowconfigure(6, weight=0)
+        elif mode == "Streaming":
+            self.entry_url.configure(placeholder_text="請輸入頻道 URL（自動偵測直播）")
+            self.playlist_frame.grid_remove()
+            self.channel_frame.grid_remove()
+            self.grid_rowconfigure(6, weight=0)
+            self.analyze_button.configure(state=tk.DISABLED)
+            self.multithread_var.set(False)
+            self.multithread_checkbox.configure(state=tk.DISABLED)
             
         self.toggle_multithread_options()
 
@@ -250,6 +266,7 @@ class App(ctk.CTk):
 
     def start_download(self):
         self.save_settings_from_ui()
+        self.stop_streaming = False
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", tk.END)
         self.log_box.configure(state="disabled")
@@ -289,7 +306,7 @@ class App(ctk.CTk):
             args["videos_to_download"] = videos_to_download
             args["max_workers"] = int(self.thread_slider.get()) if self.multithread_var.get() else 1
             target = download_playlist
-        else:   # Channel
+        elif mode == "Channel": # Channel
             if (self.dl_shorts_var.get() or self.dl_videos_var.get() or self.dl_streams_var.get()) == False:
                 messagebox.showwarning("提示", "請至少選擇一個下載類型。\n")
                 self.download_button.configure(state=tk.NORMAL)
@@ -300,6 +317,10 @@ class App(ctk.CTk):
                                "videos": self.dl_videos_var.get(),
                                "streams": self.dl_streams_var.get()}
             target = download_channel
+        else: # Streaming
+            args["channel_url"] = url
+            args["stop_flag"] = lambda: self.stop_streaming
+            target = download_streaming
 
 
         download_thread = threading.Thread(target=target, kwargs=args)
@@ -308,6 +329,7 @@ class App(ctk.CTk):
     # ... (other methods like on_closing, load_settings, save_settings, logging, progress handling are mostly the same)
     def on_closing(self) -> None:
         self.save_settings_from_ui()
+        self.stop_streaming = True
         self.destroy()
 
     def load_settings_to_ui(self) -> None:

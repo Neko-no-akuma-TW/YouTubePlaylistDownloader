@@ -88,7 +88,7 @@ class ProgressLogger:
 
 # --- Core Download Functions ---
 
-def download_video(video_url: str, output_path: str, video_number: int, use_cookies: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None, write_info_json: bool = True) -> Optional[str]:
+def download_video(video_url: str, output_path: str, video_number: int, use_cookies: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None, write_info_json: bool = True, live_from_start: bool = False) -> Optional[str]:
     format_opts = get_format_options(download_format)
     
     def hook(d):
@@ -116,6 +116,8 @@ def download_video(video_url: str, output_path: str, video_number: int, use_cook
         'download_archive': os.path.join(output_path, 'downloaded.txt'),
         'skip_unavailable_fragments': True,  # Skip unavailable fragments robustly
     }
+    if live_from_start:
+        ydl_opts['live_from_start'] = True
     if not use_pot:
         ydl_opts['nop_plugins'] = True
     ydl_opts.update(format_opts)
@@ -276,6 +278,137 @@ def download_channel(channel_url: str, output_path: str, dl_type: dict[str, bool
             channel_title = sanitize_filename(info.get('title', 'channel'))
             download_playlist(videos_to_download, output_path, use_cookies, max_workers, zip_files, download_format, use_pot, progress_hook, playlist_title_override=f"{channel_title}_{key}", write_info_json=write_info_json)
 
+def _normalize_channel_url(channel_url: str) -> str:
+    normalized = channel_url.strip().rstrip("/")
+    normalized = re.sub(r"/(videos|shorts|streams|featured|live)$", "", normalized)
+    return normalized
+
+def _iter_live_entries(entries: Any):
+    if not isinstance(entries, list):
+        return
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("live_status") == "is_live":
+            yield entry
+        nested_entries = entry.get("entries")
+        if isinstance(nested_entries, list):
+            yield from _iter_live_entries(nested_entries)
+
+def _get_live_candidate_urls(channel_url: str) -> List[str]:
+    base_url = _normalize_channel_url(channel_url)
+    candidates = [
+        f"{base_url}/live",
+        f"{base_url}/streams",
+        base_url,
+    ]
+    deduped: List[str] = []
+    seen = set()
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            deduped.append(candidate)
+    return deduped
+
+def download_streaming(
+    channel_url: str,
+    output_path: str,
+    use_cookies: bool,
+    zip_files: bool,
+    download_format: str,
+    use_pot: bool,
+    progress_hook: Optional[Callable] = None,
+    write_info_json: bool = True,
+    check_interval: int = 60,
+    stop_flag: Optional[Callable[[], bool]] = None
+) -> None:
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+
+    downloaded_live_ids = set()
+
+    def log(msg, status="info"):
+        if progress_hook:
+            progress_hook({'status': status, 'message': msg})
+
+    log("Streaming 模式啟動：開始監控直播...")
+
+    ydl_opts = {
+        "quiet": True,
+        "extract_flat": True,
+        "cookiefile": 'cookies.txt' if use_cookies else None,
+        'live_from_start': True,
+    }
+
+    if not use_pot:
+        ydl_opts['nop_plugins'] = True
+
+    try:
+        while True:
+            if stop_flag and stop_flag():
+                log("Streaming 已停止", "warning")
+                break
+            try:
+                log("檢查是否有直播中...")
+
+                found_live = False
+                for candidate_url in _get_live_candidate_urls(channel_url):
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(candidate_url, download=False)
+
+                    if not info:
+                        continue
+
+                    live_entries = []
+                    if info.get("live_status") == "is_live":
+                        live_entries.append(info)
+                    live_entries.extend(_iter_live_entries(info.get("entries")))
+
+                    for entry in live_entries:
+                        live_id = entry.get("id")
+                        live_url = entry.get("webpage_url") or entry.get("url")
+
+                        if not live_id or not live_url:
+                            continue
+
+                        found_live = True
+
+                        if live_id in downloaded_live_ids:
+                            continue
+
+                        log(f"偵測到直播：{entry.get('title', 'Unknown')}")
+                        downloaded_live_ids.add(live_id)
+
+                        video_path = download_video(
+                            video_url=live_url,
+                            output_path=output_path,
+                            video_number=0,
+                            use_cookies=use_cookies,
+                            download_format=download_format,
+                            use_pot=use_pot,
+                            progress_hook=progress_hook,
+                            write_info_json=write_info_json,
+                            live_from_start=True
+                        )
+
+                        if zip_files and video_path:
+                            log("直播下載完成，開始壓縮...", "postprocessing")
+                            base_name = os.path.splitext(os.path.basename(video_path))[0]
+                            zip_name = f"{base_name}.zip"
+                            zip_and_cleanup_files([video_path], zip_name, output_path)
+
+                        cleanup_temp_files(output_path)
+
+                if not found_live:
+                    log("目前沒有直播")
+
+            except Exception as e:
+                log(f"偵測錯誤: {str(e)}", "error")
+
+            time.sleep(check_interval)
+
+    except KeyboardInterrupt:
+        log("Streaming 監控已停止", "warning")
 
 def download_single_video(video_url: str, output_path: str, use_cookies: bool, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None, write_info_json: bool = True) -> None:
     if not os.path.exists(output_path):
