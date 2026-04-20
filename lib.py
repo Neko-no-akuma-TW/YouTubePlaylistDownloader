@@ -21,7 +21,7 @@ if sys.version_info < (3, 10):
 SUPPORTED_SUB_LANGS: List[str] = ['zh.TW', 'zh.CN', 'en', 'ja']
 SUB_EXTENSIONS: List[str] = ['.vtt', '.srt']
 # Only delete actual temporary files, NOT thumbnails (webp/jpg are valid downloads)
-TEMP_FILE_PATTERNS: List[str] = ["*.temp.mp4", "*.metadata.json", "*.[0-9][0-9][0-9]"]
+TEMP_FILE_PATTERNS: List[str] = ["*.temp.mp4", "*.tmp.mp4", "*.part", "*.metadata.json", "*.[0-9][0-9][0-9]"]
 THUMBNAIL_PATTERNS: List[str] = ["*.webp", "*.jpg"]  # Keep these as they are thumbnails
 FILES_PER_ZIP: int = 10
 
