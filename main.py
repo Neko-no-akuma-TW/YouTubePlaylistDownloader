@@ -168,6 +168,10 @@ class App(ctk.CTk):
         self.check_progress_queue()
 
     def toggle_mode(self, mode: str):
+        # Unfocus the URL entry to prevent placeholder issues before clearing it.
+        self.focus_set()
+        self.entry_url.delete(0, tk.END)
+
         is_playlist = mode == "Playlist"
         self.analyze_button.configure(state=tk.DISABLED if mode == "Video" else tk.NORMAL)
         if mode == "Video":
