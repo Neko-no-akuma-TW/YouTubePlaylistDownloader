@@ -311,7 +311,7 @@ class App(ctk.CTk):
             args["max_workers"] = int(self.thread_slider.get()) if self.multithread_var.get() else 1
             target = download_playlist
         elif mode == "Channel": # Channel
-            if (self.dl_shorts_var.get() or self.dl_videos_var.get() or self.dl_streams_var.get()) == False:
+            if not (self.dl_shorts_var.get() or self.dl_videos_var.get() or self.dl_streams_var.get()):
                 messagebox.showwarning("提示", "請至少選擇一個下載類型。\n")
                 self.download_button.configure(state=tk.NORMAL)
                 return
@@ -374,18 +374,46 @@ class App(ctk.CTk):
     def update_thread_label(self, value: float) -> None:
         self.thread_slider_label.configure(text=f"執行緒數: {int(value)}")
 
+    def show_link_messagebox(self, title, message, link_text, url):
+        # 建立一個子視窗來模擬messagebox
+        dialog = ctk.CTkToplevel()
+        dialog.title(title)
+        dialog.geometry("400x250")
+        dialog.resizable(False, False)
+
+        # 讓視窗變成Modal，必須關閉才可以繼續操作主視窗
+        dialog.transient(self)
+        dialog.grab_set()
+
+        msg_label = ctk.CTkLabel(dialog, text=message)
+        msg_label.pack(pady=(20, 5))
+
+        #顯示超連結
+        link_label = ctk.CTkLabel(dialog, text=link_text, text_color="blue", cursor="hand2")
+        link_label.pack()
+
+        link_font = ('CTkDefaultFont', 14, 'underline')
+        link_label.configure(font=link_font)
+
+        link_label.bind("<Button-1>", lambda event: webbrowser.open(url))
+
+        ok_button = ctk.CTkButton(dialog, text="確定", command=dialog.destroy, width=10)
+        ok_button.pack(pady=(15, 10))
+
+
     def show_pot_info(self) -> None:
         """Show PotProvider information dialog."""
         info_msg = (
             "PotProvider 是 yt-dlp 的一個插件，可以幫助繞過某些地理限制。\n\n"
             "使用方式：\n"
-            "1. 安裝 PotProvider：pip install yt-dlp-pot\n"
-            "2. 啟動本地伺服器：python -m http.server 4416\n"
+            "1. 安裝 Python PotProvider：pip install bgutil-ytdlp-pot-provider\n"
+            "2. 安裝並配置本地伺服器：請參閱下方部署方式說明連結\n"
             "3. 在此應用程序中勾選「使用 PotProvider」\n\n"
             "如果未勾選，將使用普通模式下載（推薦用於大多數情況）。\n"
             "若伺服器無法連接，應用將自動切換到普通模式。"
         )
-        messagebox.showinfo("PotProvider 說明", info_msg)
+        self.show_link_messagebox("PotProvider 說明", info_msg, "PotProvider伺服器部署方式說明(GitHub)",
+                                  "https://github.com/Brainicism/bgutil-ytdlp-pot-provider#installation")
 
     def check_progress_queue(self):
         try:
