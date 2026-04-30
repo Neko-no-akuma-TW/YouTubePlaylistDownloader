@@ -19,7 +19,7 @@ CONFIG_FILE = "config.json"
 def load_config() -> Dict[str, Any]:
     defaults = {
         "path": "", "use_cookies": False, "multithread": False, 
-        "threads": 5, "zip_files": True, "format": "Best Video", "use_pot": False
+        "threads": 5, "zip_files": True, "format": "Best Video", "use_pot": False, "write_info_json": True
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -57,7 +57,13 @@ class App(ctk.CTk):
         self.label = ctk.CTkLabel(self, text="YouTube Downloader", font=ctk.CTkFont(size=20, weight="bold"))
         self.label.grid(row=0, column=0, columnspan=3, padx=20, pady=10)
 
-        self.mode_button = ctk.CTkSegmentedButton(self, values=["Video", "Playlist", "Channel"], command=self.toggle_mode)
+        # Version check warning
+        if sys.version_info < (3, 10):
+            version_warning = f"⚠ Python {sys.version_info.major}.{sys.version_info.minor} detected - yt-dlp requires 3.10+ for optimal support"
+            self.version_label = ctk.CTkLabel(self, text=version_warning, text_color="orange", font=ctk.CTkFont(size=10))
+            self.version_label.grid(row=0, column=3, columnspan=2, padx=20, pady=(10, 0))
+
+        self.mode_button = ctk.CTkSegmentedButton(self, values=["Video", "Playlist", "Channel", "Streaming"], command=self.toggle_mode)
         self.mode_button.grid(row=1, column=0, columnspan=3, padx=20, pady=10, sticky="ew")
 
         self.url_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -88,7 +94,7 @@ class App(ctk.CTk):
         self.format_menu = ctk.CTkOptionMenu(self.options_frame, values=["Best Video", "1080p", "720p", "Audio (MP3)"], variable=self.format_var)
         self.format_menu.grid(row=1, column=0, sticky="ew", padx=(0,10))
 
-        self.thread_slider_label = ctk.CTkLabel(self.options_frame, text="線程數: 5")
+        self.thread_slider_label = ctk.CTkLabel(self.options_frame, text="執行緒數: 5")
         self.thread_slider_label.grid(row=0, column=1, padx=(10,0), pady=5, sticky="w")
         self.thread_slider = ctk.CTkSlider(self.options_frame, from_=1, to=10, number_of_steps=9, command=self.update_thread_label)
         self.thread_slider.grid(row=1, column=1, sticky="ew", padx=(10,0))
@@ -102,11 +108,17 @@ class App(ctk.CTk):
         self.zip_files_checkbox = ctk.CTkCheckBox(self.checkbox_frame, text="下載後壓縮", variable=self.zip_files_var)
         self.zip_files_checkbox.pack(side="left", padx=(0, 20))
         self.multithread_var = tk.BooleanVar()
-        self.multithread_checkbox = ctk.CTkCheckBox(self.checkbox_frame, text="多線程下載", variable=self.multithread_var, command=self.toggle_multithread_options)
+        self.multithread_checkbox = ctk.CTkCheckBox(self.checkbox_frame, text="多執行緒下載", variable=self.multithread_var, command=self.toggle_multithread_options)
         self.multithread_checkbox.pack(side="left", padx=(0, 20))
         self.use_pot_var = tk.BooleanVar()
         self.use_pot_checkbox = ctk.CTkCheckBox(self.checkbox_frame, text="使用 PotProvider", variable=self.use_pot_var)
-        self.use_pot_checkbox.pack(side="left")
+        self.use_pot_checkbox.pack(side="left", padx=(0, 5))
+        self.pot_info_button = ctk.CTkButton(self.checkbox_frame, text="ℹ", width=25, height=25, 
+                                              command=self.show_pot_info, font=ctk.CTkFont(size=12))
+        self.pot_info_button.pack(side="left", padx=(0, 20))
+        self.write_info_json_var = tk.BooleanVar(value=True)
+        self.write_info_json_checkbox = ctk.CTkCheckBox(self.checkbox_frame, text="下載影片資訊", variable=self.write_info_json_var)
+        self.write_info_json_checkbox.pack(side="left")
 
         # Playlist Frame
         self.playlist_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -138,6 +150,9 @@ class App(ctk.CTk):
         self.dl_streams_checkbox = ctk.CTkCheckBox(self.channel_frame, text="直播", variable=self.dl_streams_var)
         self.dl_streams_checkbox.pack(side="left", padx=(0, 30), pady=(0,5))
 
+        # Streaming
+        self.stop_streaming = False
+
         # --- Bottom Widgets ---
         self.download_button = ctk.CTkButton(self, text="下載", command=self.start_download)
         self.download_button.grid(row=7, column=0, columnspan=3, padx=20, pady=10, sticky="ew")
@@ -158,27 +173,40 @@ class App(ctk.CTk):
         self.entry_url.delete(0, tk.END)
 
         is_playlist = mode == "Playlist"
-        self.multithread_checkbox.configure(state=tk.DISABLED if mode == "Video" else tk.NORMAL)
         self.analyze_button.configure(state=tk.DISABLED if mode == "Video" else tk.NORMAL)
         if mode == "Video":
             self.entry_url.configure(placeholder_text="請輸入影片 URL")
-            self.multithread_var.set(False)
             # Hide playlist frame, hide channel frame
             self.playlist_frame.grid_remove()
             self.channel_frame.grid_remove()
+            self.analyze_button.configure(state=tk.DISABLED)
+            self.multithread_var.set(False)
+            self.multithread_checkbox.configure(state=tk.DISABLED)
             self.grid_rowconfigure(6, weight=0)
         elif mode == "Playlist":
             # Show playlist frame, hide channel frame
             self.entry_url.configure(placeholder_text="請輸入播放清單 URL")
             self.channel_frame.grid_remove()
             self.playlist_frame.grid()
+            self.analyze_button.configure(state=tk.NORMAL)
+            self.multithread_checkbox.configure(state=tk.NORMAL)
             self.grid_rowconfigure(6, weight=1)
-        else:
+        elif mode == "Channel":
             # Hide playlist frame, show channel frame
             self.entry_url.configure(placeholder_text="請輸入頻道 URL")
             self.playlist_frame.grid_remove()
             self.channel_frame.grid()
+            self.analyze_button.configure(state=tk.NORMAL)
+            self.multithread_checkbox.configure(state=tk.NORMAL)
             self.grid_rowconfigure(6, weight=0)
+        elif mode == "Streaming":
+            self.entry_url.configure(placeholder_text="請輸入頻道 URL（自動偵測直播）")
+            self.playlist_frame.grid_remove()
+            self.channel_frame.grid_remove()
+            self.grid_rowconfigure(6, weight=0)
+            self.analyze_button.configure(state=tk.DISABLED)
+            self.multithread_var.set(False)
+            self.multithread_checkbox.configure(state=tk.DISABLED)
             
         self.toggle_multithread_options()
 
@@ -242,10 +270,12 @@ class App(ctk.CTk):
 
     def start_download(self):
         self.save_settings_from_ui()
+        self.stop_streaming = False
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", tk.END)
         self.log_box.configure(state="disabled")
         self.log("開始準備下載...")
+        self.log("ℹ 說明: 下載會保留縮圖文件 (.webp/.jpg)，並嘗試將其嵌入到影片中")
         self.progressbar.set(0)
 
         mode = self.mode_button.get()
@@ -264,6 +294,7 @@ class App(ctk.CTk):
             "zip_files": self.zip_files_var.get(),
             "download_format": self.format_var.get(),
             "use_pot": self.use_pot_var.get(),
+            "write_info_json": self.write_info_json_var.get(),
             "progress_hook": self.progress_queue.put
         }
 
@@ -279,16 +310,21 @@ class App(ctk.CTk):
             args["videos_to_download"] = videos_to_download
             args["max_workers"] = int(self.thread_slider.get()) if self.multithread_var.get() else 1
             target = download_playlist
-        else:   # Channel
+        elif mode == "Channel": # Channel
             if (self.dl_shorts_var.get() or self.dl_videos_var.get() or self.dl_streams_var.get()) == False:
                 messagebox.showwarning("提示", "請至少選擇一個下載類型。\n")
                 self.download_button.configure(state=tk.NORMAL)
                 return
             args["channel_url"] = url if len(url.split("/")) < 3 else "/".join(url.split("/")[:4])
+            args["max_workers"] = int(self.thread_slider.get()) if self.multithread_var.get() else 1
             args["dl_type"] = {"shorts": self.dl_shorts_var.get(),
                                "videos": self.dl_videos_var.get(),
                                "streams": self.dl_streams_var.get()}
             target = download_channel
+        else: # Streaming
+            args["channel_url"] = url
+            args["stop_flag"] = lambda: self.stop_streaming
+            target = download_streaming
 
 
         download_thread = threading.Thread(target=target, kwargs=args)
@@ -297,6 +333,7 @@ class App(ctk.CTk):
     # ... (other methods like on_closing, load_settings, save_settings, logging, progress handling are mostly the same)
     def on_closing(self) -> None:
         self.save_settings_from_ui()
+        self.stop_streaming = True
         self.destroy()
 
     def load_settings_to_ui(self) -> None:
@@ -310,6 +347,7 @@ class App(ctk.CTk):
         self.update_thread_label(thread_count)
         self.format_var.set(self.config.get("format", "Best Video"))
         self.use_pot_var.set(self.config.get("use_pot", False))
+        self.write_info_json_var.set(self.config.get("write_info_json", True))
 
     def save_settings_from_ui(self) -> None:
         self.config["path"] = self.entry_path.get().strip()
@@ -319,6 +357,7 @@ class App(ctk.CTk):
         self.config["threads"] = int(self.thread_slider.get())
         self.config["format"] = self.format_var.get()
         self.config["use_pot"] = self.use_pot_var.get()
+        self.config["write_info_json"] = self.write_info_json_var.get()
         save_config(self.config)
 
     def browse_directory(self) -> None:
@@ -328,12 +367,25 @@ class App(ctk.CTk):
             self.entry_path.insert(0, directory)
 
     def toggle_multithread_options(self) -> None:
-        is_multithread_enabled = self.multithread_var.get() and self.mode_button.get() == "Playlist"
+        is_multithread_enabled = self.multithread_var.get() and self.mode_button.get() in ["Playlist", "Channel"]
         self.thread_slider_label.configure(state=tk.NORMAL if is_multithread_enabled else tk.DISABLED)
         self.thread_slider.configure(state=tk.NORMAL if is_multithread_enabled else tk.DISABLED)
 
     def update_thread_label(self, value: float) -> None:
-        self.thread_slider_label.configure(text=f"線程數: {int(value)}")
+        self.thread_slider_label.configure(text=f"執行緒數: {int(value)}")
+
+    def show_pot_info(self) -> None:
+        """Show PotProvider information dialog."""
+        info_msg = (
+            "PotProvider 是 yt-dlp 的一個插件，可以幫助繞過某些地理限制。\n\n"
+            "使用方式：\n"
+            "1. 安裝 PotProvider：pip install yt-dlp-pot\n"
+            "2. 啟動本地伺服器：python -m http.server 4416\n"
+            "3. 在此應用程序中勾選「使用 PotProvider」\n\n"
+            "如果未勾選，將使用普通模式下載（推薦用於大多數情況）。\n"
+            "若伺服器無法連接，應用將自動切換到普通模式。"
+        )
+        messagebox.showinfo("PotProvider 說明", info_msg)
 
     def check_progress_queue(self):
         try:
@@ -398,6 +450,7 @@ def main():
         parser.add_argument("--zip", action="store_true", default=True, help="Zip files after download")
         parser.add_argument("--no-zip", action="store_false", dest="zip", help="Do not zip files")
         parser.add_argument("--pot", action="store_true", help="Use PotProvider")
+        parser.add_argument("--no-info", action="store_false", dest="write_info_json", default=True, help="Do not download video info JSON")
         
         args = parser.parse_args()
         
@@ -432,6 +485,7 @@ def main():
                 zip_files=args.zip,
                 download_format=args.format,
                 use_pot=args.pot,
+                write_info_json=args.write_info_json,
                 progress_hook=lambda d: print(f"[{d.get('status', 'INFO')}] {d.get('message', '')}")
             )
         else:
@@ -442,6 +496,7 @@ def main():
                 zip_files=args.zip,
                 download_format=args.format,
                 use_pot=args.pot,
+                write_info_json=args.write_info_json,
                 progress_hook=lambda d: print(f"[{d.get('status', 'INFO')}] {d.get('message', '')}")
              )
 
