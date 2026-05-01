@@ -39,7 +39,7 @@ def get_playlist_info(playlist_url: str, use_cookies: bool, use_pot: bool) -> Op
 
     ydl_opts = {
         'extract_flat': 'in_playlist',  # 將 True 改為 'in_playlist'，這對解析長清單更有效
-        'quiet': False,
+        'quiet': True,
         'ignoreconfig': True,
         # 'cookiefile': 'cookies.txt' if use_cookies else None,
         'ignoreerrors': True,
