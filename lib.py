@@ -1,7 +1,6 @@
 import os
 import re
-import json
-import shutil
+import urllib.parse
 import sys
 import subprocess
 import yt_dlp
@@ -29,16 +28,29 @@ FILES_PER_ZIP: int = 10
 
 def get_playlist_info(playlist_url: str, use_cookies: bool, use_pot: bool) -> Optional[Dict[str, Any]]:
     """獲取播放清單的資訊，但不下載影片。"""
+
+    # 【修復核心】：判斷如果是包含 list 參數的網址，強制將其轉換為「純播放清單」網址
+    # 這樣可以避免 YouTube 觀看頁面 (watch) 最高只會顯示 100 部影片的限制
+    if "youtube.com" in playlist_url or "youtu.be" in playlist_url:
+        parsed_url = urllib.parse.urlparse(playlist_url)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        if 'list' in query_params:
+            playlist_url = f"https://www.youtube.com/playlist?list={query_params['list'][0]}"
+
     ydl_opts = {
-        'extract_flat': True,
-        'quiet': True,
-        'cookiefile': 'cookies.txt' if use_cookies else None,
+        'extract_flat': 'in_playlist',  # 將 True 改為 'in_playlist'，這對解析長清單更有效
+        'quiet': False,
+        'ignoreconfig': True,
+        # 'cookiefile': 'cookies.txt' if use_cookies else None,
+        'ignoreerrors': True,
+        # 移除原先硬性限制的 'playlist_items' 與 'extractor_args'，讓 yt-dlp 自動處理分頁與抓取全部
     }
+
     if not use_pot:
         ydl_opts['nop_plugins'] = True
-    else:
-        ydl_opts['quiet'] = False  # Show messages for PotProvider debugging
+
     try:
+        print(f"正在解析播放清單網址: {playlist_url}") # 幫助確認轉換後的網址
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(playlist_url, download=False)
     except Exception as e:
