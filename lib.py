@@ -21,7 +21,7 @@ SUPPORTED_SUB_LANGS: List[str] = ['zh.TW', 'zh.CN', 'en', 'ja']
 SUB_EXTENSIONS: List[str] = ['.vtt', '.srt']
 # Only delete actual temporary files, NOT thumbnails (webp/jpg are valid downloads)
 TEMP_FILE_PATTERNS: List[str] = ["*.temp.mp4", "*.tmp.mp4", "*.part", "*.metadata.json", "*.[0-9][0-9][0-9]"]
-THUMBNAIL_PATTERNS: List[str] = ["*.webp", "*.jpg"]  # Keep these as they are thumbnails
+THUMBNAIL_PATTERNS: List[str] = ["*.webp", "*.jpg", "*.png"]  # Keep these as they are thumbnails
 FILES_PER_ZIP: int = 10
 
 # --- Helper Functions ---
@@ -134,68 +134,93 @@ def download_video(video_url: str, output_path: str, video_number: int, use_cook
         ydl_opts['nop_plugins'] = True
     ydl_opts.update(format_opts)
 
+    success = False
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
             filename = ydl.prepare_filename(info)
-        
-        final_ext = ".mp3" if "Audio" in download_format else ".mp4"
-        if not filename.endswith(final_ext):
-             base, _ = os.path.splitext(filename)
-             filename = base + final_ext
-
-        if not os.path.exists(filename):
-            if progress_hook: progress_hook({'status': 'error', 'message': f"File {filename} not found after download."})
-            return None
-
-        video_path = filename
-        if "Audio" not in download_format:
-            # Try to embed thumbnail into video
-            base, _ = os.path.splitext(video_path)
-            # Look for thumbnail files (webp or jpg)
-            thumbnail_file = None
-            for thumb_ext in ['.webp', '.jpg', '.png']:
-                potential_thumb = base + thumb_ext
-                if os.path.exists(potential_thumb):
-                    thumbnail_file = potential_thumb
-                    break
-            
-            if thumbnail_file:
-                if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Embedding thumbnail into video...'})
-                if embed_thumbnail_to_video(video_path, thumbnail_file):
-                    if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Thumbnail embedded successfully'})
-                else:
-                    if progress_hook: progress_hook({'status': 'info', 'message': f'Thumbnail file preserved: {os.path.basename(thumbnail_file)}'})
-        
-        if progress_hook: progress_hook({'status': 'finished_video', 'message': f"Finished: {os.path.basename(video_path)}"})
-        return video_path
-
+            success = True
     except Exception as e:
         error_msg = str(e)
-        # More informative error messages
-        if "127.0.0.1:4416" in error_msg or "PotProvider" in error_msg.lower() or "TransportError" in error_msg:
-            if progress_hook: 
-                progress_hook({'status': 'warning', 'message': 'PotProvider 伺服器未運行或無法連線。將使用普通模式繼續下載。'})
-                progress_hook({'status': 'warning', 'message': '如需使用 PotProvider，請啟動本地伺服器：python -m http.server 4416'})
-            # Try again without PotProvider
-            if use_pot:
-                ydl_opts['nop_plugins'] = True
-                try:
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(video_url, download=True)
-                        filename = ydl.prepare_filename(info)
-                    final_ext = ".mp3" if "Audio" in download_format else ".mp4"
-                    if not filename.endswith(final_ext):
-                         base, _ = os.path.splitext(filename)
-                         filename = base + final_ext
-                    if os.path.exists(filename):
-                        if progress_hook: progress_hook({'status': 'finished_video', 'message': f"Finished (without PotProvider): {os.path.basename(filename)}"})
-                        return filename
-                except Exception as retry_e:
-                    if progress_hook: progress_hook({'status': 'error', 'message': f'重試失敗: {str(retry_e)}'})
-                    return None
-        if progress_hook: progress_hook({'status': 'error', 'message': error_msg})
+        if "no video formats found" in error_msg.lower() and ydl_opts.get('live_from_start'):
+            if progress_hook:
+                progress_hook({'status': 'warning', 'message': '從頭下載直播失敗 (可能 YouTube 限制此格式)，嘗試從目前進度下載...'})
+            ydl_opts_retry = ydl_opts.copy()
+            ydl_opts_retry['live_from_start'] = False
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts_retry) as ydl_retry:
+                    info = ydl_retry.extract_info(video_url, download=True)
+                    filename = ydl_retry.prepare_filename(info)
+                    success = True
+            except Exception as retry_e:
+                error_msg = str(retry_e)
+
+        if not success:
+            if "no video formats found" in error_msg.lower():
+                if progress_hook:
+                    progress_hook({'status': 'info', 'message': '直播尚未開始（等待中/預告中），將於下次檢測時重新嘗試。'})
+                return None
+            # More informative error messages
+            if "127.0.0.1:4416" in error_msg or "PotProvider" in error_msg.lower() or "TransportError" in error_msg:
+                if progress_hook: 
+                    progress_hook({'status': 'warning', 'message': 'PotProvider 伺服器未運行或無法連線。將使用普通模式繼續下載。'})
+                    progress_hook({'status': 'warning', 'message': '如需使用 PotProvider，請啟動本地伺服器：python -m http.server 4416'})
+                # Try again without PotProvider
+                if use_pot:
+                    ydl_opts_retry = ydl_opts.copy()
+                    ydl_opts_retry['nop_plugins'] = True
+                    try:
+                        with yt_dlp.YoutubeDL(ydl_opts_retry) as ydl:
+                            info = ydl.extract_info(video_url, download=True)
+                            filename = ydl.prepare_filename(info)
+                        success = True
+                    except Exception as retry_e:
+                        if progress_hook: progress_hook({'status': 'error', 'message': f'重試失敗: {str(retry_e)}'})
+                        return None
+            
+            if not success:
+                if progress_hook: progress_hook({'status': 'error', 'message': error_msg})
+                return None
+        
+    # Success block
+    final_ext = ".mp3" if "Audio" in download_format else ".mp4"
+    if not filename.endswith(final_ext):
+         base, _ = os.path.splitext(filename)
+         filename = base + final_ext
+
+    if not os.path.exists(filename):
+        if progress_hook: progress_hook({'status': 'error', 'message': f"File {filename} not found after download."})
         return None
+
+    video_path = filename
+    if "Audio" not in download_format:
+        # Try to embed thumbnail into video
+        base, _ = os.path.splitext(video_path)
+        # Look for thumbnail files (webp or jpg)
+        thumbnail_file = None
+        for thumb_ext in ['.webp', '.jpg', '.png']:
+            potential_thumb = base + thumb_ext
+            if os.path.exists(potential_thumb):
+                thumbnail_file = potential_thumb
+                break
+        
+        if thumbnail_file:
+            if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Embedding thumbnail into video...'})
+            if embed_thumbnail_to_video(video_path, thumbnail_file):
+                if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Thumbnail embedded successfully'})
+            else:
+                if progress_hook: progress_hook({'status': 'info', 'message': f'Thumbnail file preserved: {os.path.basename(thumbnail_file)}'})
+            
+            # 如果不勾選「保存影片資訊」，則在嵌入後刪除縮圖檔案
+            if not write_info_json:
+                try:
+                    os.remove(thumbnail_file)
+                    if progress_hook: progress_hook({'status': 'postprocessing', 'message': f'Removed thumbnail file: {os.path.basename(thumbnail_file)}'})
+                except Exception as e:
+                    if progress_hook: progress_hook({'status': 'warning', 'message': f'Failed to remove thumbnail file: {e}'})
+    
+    if progress_hook: progress_hook({'status': 'finished_video', 'message': f"Finished: {os.path.basename(video_path)}"})
+    return video_path
 
 def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str, use_cookies: bool, max_workers: int, zip_files: bool, download_format: str, use_pot: bool, progress_hook: Optional[Callable] = None, playlist_title_override: Optional[str] = None, write_info_json: bool = True) -> None:
     if not os.path.exists(output_path):
@@ -256,7 +281,7 @@ def download_playlist(videos_to_download: List[Dict[str, Any]], output_path: str
         process_batch()
     
     if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Cleaning up temporary files...'})
-    cleanup_temp_files(output_path)
+    cleanup_temp_files(output_path, write_info_json)
     if progress_hook: progress_hook({'status': 'all_finished', 'message': 'All tasks completed.'})
 
 def download_channel(channel_url: str, output_path: str, dl_type: dict[str, bool], 
@@ -301,7 +326,7 @@ def _iter_live_entries(entries: Any):
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        if entry.get("live_status") == "is_live":
+        if entry.get("live_status") == "is_live" or (entry.get("is_live") and entry.get("live_status") != "is_upcoming"):
             yield entry
         nested_entries = entry.get("entries")
         if isinstance(nested_entries, list):
@@ -349,7 +374,7 @@ def download_streaming(
         "quiet": True,
         "extract_flat": True,
         "cookiefile": 'cookies.txt' if use_cookies else None,
-        'live_from_start': True,
+        'ignore_no_formats_error': True,
     }
 
     if not use_pot:
@@ -365,18 +390,100 @@ def download_streaming(
 
                 found_live = False
                 for candidate_url in _get_live_candidate_urls(channel_url):
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(candidate_url, download=False)
-
-                    if not info:
+                    if stop_flag and stop_flag():
+                        break
+                    
+                    try:
+                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            info = ydl.extract_info(candidate_url, download=False)
+                        if not info:
+                            continue
+                    except Exception as e:
+                        # Normal to fail if channel is offline (especially /live)
+                        msg = str(e)
+                        if "not currently live" in msg or "is not live" in msg:
+                            pass
+                        else:
+                            log(f"檢查候選網址 {candidate_url} 時發生錯誤: {msg}", "info")
                         continue
 
                     live_entries = []
-                    if info.get("live_status") == "is_live":
-                        live_entries.append(info)
-                    live_entries.extend(_iter_live_entries(info.get("entries")))
+                    info_type = info.get("_type")
+
+                    # Case 1: Single video entry (e.g. redirected from /live or direct video URL)
+                    if info_type == "url" or info_type is None:
+                        video_url = info.get("url") or info.get("webpage_url")
+                        if video_url:
+                            try:
+                                # Fetch full info to verify if it is live
+                                full_opts = {**ydl_opts, "extract_flat": False}
+                                with yt_dlp.YoutubeDL(full_opts) as ydl_full:
+                                    video_info = ydl_full.extract_info(video_url, download=False)
+                                if video_info and (video_info.get("live_status") == "is_live" or (video_info.get("is_live") and video_info.get("live_status") != "is_upcoming")):
+                                    live_entries.append(video_info)
+                            except Exception as e:
+                                msg = str(e)
+                                if "no video formats found" in msg.lower():
+                                    log(f"無法取得影片格式 (可能尚未開播或暫時無法解析): {video_url}", "info")
+                                else:
+                                    log(f"解析影片資訊失敗: {msg}", "warning")
+                        elif info.get("live_status") == "is_live" or (info.get("is_live") and info.get("live_status") != "is_upcoming"):
+                            live_entries.append(info)
+
+                    # Case 2: Playlist or tab page (like /streams or channel home page)
+                    elif info_type == "playlist":
+                        if info.get("live_status") == "is_live" or (info.get("is_live") and info.get("live_status") != "is_upcoming"):
+                            live_entries.append(info)
+                        
+                        entries = info.get("entries") or []
+                        for entry in entries:
+                            if not entry:
+                                continue
+                            
+                            # Check if the flat entry is marked live
+                            if entry.get("live_status") == "is_live" or (entry.get("is_live") and entry.get("live_status") != "is_upcoming"):
+                                video_url = entry.get("url") or entry.get("webpage_url")
+                                if video_url:
+                                    try:
+                                        full_opts = {**ydl_opts, "extract_flat": False}
+                                        with yt_dlp.YoutubeDL(full_opts) as ydl_full:
+                                            video_info = ydl_full.extract_info(video_url, download=False)
+                                        if video_info and (video_info.get("live_status") == "is_live" or (video_info.get("is_live") and video_info.get("live_status") != "is_upcoming")):
+                                            live_entries.append(video_info)
+                                    except Exception as e:
+                                        msg = str(e)
+                                        if "no video formats found" in msg.lower():
+                                            log(f"無法取得影片格式 (可能尚未開播或暫時無法解析): {video_url}", "info")
+                                        else:
+                                            log(f"解析影片資訊失敗: {msg}", "warning")
+                                else:
+                                    live_entries.append(entry)
+
+                            # Handle potential nested entries
+                            nested_entries = entry.get("entries")
+                            if nested_entries:
+                                for nested in _iter_live_entries(nested_entries):
+                                    nested_url = nested.get("url") or nested.get("webpage_url")
+                                    if nested_url:
+                                        try:
+                                            full_opts = {**ydl_opts, "extract_flat": False}
+                                            with yt_dlp.YoutubeDL(full_opts) as ydl_full:
+                                                video_info = ydl_full.extract_info(nested_url, download=False)
+                                            if video_info and (video_info.get("live_status") == "is_live" or (video_info.get("is_live") and video_info.get("live_status") != "is_upcoming")):
+                                                live_entries.append(video_info)
+                                        except Exception as e:
+                                            msg = str(e)
+                                            if "no video formats found" in msg.lower():
+                                                log(f"無法取得影片格式 (可能尚未開播或暫時無法解析): {nested_url}", "info")
+                                            else:
+                                                log(f"解析影片資訊失敗: {msg}", "warning")
+                                    else:
+                                        live_entries.append(nested)
 
                     for entry in live_entries:
+                        if stop_flag and stop_flag():
+                            break
+
                         live_id = entry.get("id")
                         live_url = entry.get("webpage_url") or entry.get("url")
 
@@ -389,7 +496,6 @@ def download_streaming(
                             continue
 
                         log(f"偵測到直播：{entry.get('title', 'Unknown')}")
-                        downloaded_live_ids.add(live_id)
 
                         video_path = download_video(
                             video_url=live_url,
@@ -403,13 +509,15 @@ def download_streaming(
                             live_from_start=True
                         )
 
-                        if zip_files and video_path:
-                            log("直播下載完成，開始壓縮...", "postprocessing")
-                            base_name = os.path.splitext(os.path.basename(video_path))[0]
-                            zip_name = f"{base_name}.zip"
-                            zip_and_cleanup_files([video_path], zip_name, output_path)
+                        if video_path:
+                            downloaded_live_ids.add(live_id)
+                            if zip_files:
+                                log("直播下載完成，開始壓縮...", "postprocessing")
+                                base_name = os.path.splitext(os.path.basename(video_path))[0]
+                                zip_name = f"{base_name}.zip"
+                                zip_and_cleanup_files([video_path], zip_name, output_path)
 
-                        cleanup_temp_files(output_path)
+                        cleanup_temp_files(output_path, write_info_json)
 
                 if not found_live:
                     log("目前沒有直播")
@@ -417,7 +525,11 @@ def download_streaming(
             except Exception as e:
                 log(f"偵測錯誤: {str(e)}", "error")
 
-            time.sleep(check_interval)
+            # Check stop flag in 1 second steps to exit faster
+            for _ in range(check_interval):
+                if stop_flag and stop_flag():
+                    break
+                time.sleep(1)
 
     except KeyboardInterrupt:
         log("Streaming 監控已停止", "warning")
@@ -434,7 +546,7 @@ def download_single_video(video_url: str, output_path: str, use_cookies: bool, z
         zip_and_cleanup_files([video_path], zip_name, output_path)
 
     if progress_hook: progress_hook({'status': 'postprocessing', 'message': 'Cleaning up temporary files...'})
-    cleanup_temp_files(output_path)
+    cleanup_temp_files(output_path, write_info_json)
     if progress_hook: progress_hook({'status': 'all_finished', 'message': 'All tasks completed.'})
 
 # --- Unchanged Functions ---
@@ -468,7 +580,8 @@ def embed_thumbnail_to_video(video_path: str, thumbnail_path: str) -> bool:
             temp_output
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        # 使用 utf-8 編碼並忽略錯誤，避免 Windows 下的 UnicodeDecodeError
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
         
         if result.returncode == 0 and os.path.exists(temp_output):
             # Replace original with embedded version
@@ -503,8 +616,8 @@ def zip_and_cleanup_files(file_list: List[str], zip_name: str, output_path: str)
                 print(f"Removed original file: {file}")
             except OSError as e:
                 print(f"Error removing original file {file}: {e}")
-def cleanup_temp_files(output_path: str):
-    """Deletes temporary files from the output directory, but preserves thumbnails."""
+def cleanup_temp_files(output_path: str, write_info_json: bool = True):
+    """Deletes temporary files from the output directory. If write_info_json is False, also deletes thumbnails and info files."""
     # Only delete actual temporary files
     for pattern in TEMP_FILE_PATTERNS:
         for file_path in glob.glob(os.path.join(output_path, pattern)):
@@ -514,5 +627,14 @@ def cleanup_temp_files(output_path: str):
             except OSError as e:
                 print(f"Error removing temp file {file_path}: {e}")
     
-    # Keep thumbnail files (.webp, .jpg) - do NOT delete them
-    print(f"[Info] Thumbnail files (.webp, .jpg) preserved in output directory")
+    if not write_info_json:
+        # Also delete thumbnail files and info json files if the user doesn't want to save them
+        for pattern in THUMBNAIL_PATTERNS + ["*.info.json"]:
+            for file_path in glob.glob(os.path.join(output_path, pattern)):
+                try:
+                    os.remove(file_path)
+                    print(f"Removed info/thumbnail file: {file_path}")
+                except OSError as e:
+                    print(f"Error removing file {file_path}: {e}")
+    else:
+        print(f"[Info] Thumbnail files and info JSONs preserved in output directory")
